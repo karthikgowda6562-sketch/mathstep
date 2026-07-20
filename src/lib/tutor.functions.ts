@@ -1,0 +1,329 @@
+import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+
+const PLANNER_MODEL = "google/gemini-2.5-flash";
+const EXECUTOR_MODEL = "google/gemini-2.5-flash";
+
+// ---------- Types ----------
+export interface PlanStep {
+  id: string;
+  title: string;
+}
+export interface Plan {
+  domain: string;
+  difficulty: string;
+  steps: PlanStep[];
+}
+export interface CompletedStep {
+  step_id: string;
+  title: string;
+  explanation: string;
+  calculation: string;
+  result: string;
+  check_expression: string;
+  guiding_question?: string;
+  verified: boolean;
+  verified_ok: boolean;
+  computed?: number | null;
+}
+
+// ---------- Create session (planner) ----------
+export const createTutorSession = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) =>
+    z
+      .object({
+        problem: z.string().min(1).max(4000),
+        mode: z.enum(["guided", "direct"]).default("direct"),
+        imageDataUrl: z.string().optional(),
+      })
+      .parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const { callGeminiJSON } = await import("./ai.server");
+
+    const systemPrompt = `You are the PLANNER for a step-by-step math tutor.
+Your ONLY job is to name the steps required to solve the problem.
+Do NOT solve the problem. Do NOT reveal intermediate results or the final answer.
+Return strict JSON: {"domain": string, "difficulty": "easy"|"medium"|"hard", "steps": [{"id": "s1", "title": "short step name"}]}
+Use 2 to 7 steps. Titles must be short (max 60 chars) and describe WHAT will be done, not the answer.`;
+
+    const userContent: Array<
+      { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }
+    > = [{ type: "text", text: `Problem:\n${data.problem}` }];
+    if (data.imageDataUrl) {
+      userContent.push({ type: "image_url", image_url: { url: data.imageDataUrl } });
+    }
+
+    const plan = await callGeminiJSON<Plan>({
+      model: PLANNER_MODEL,
+      temperature: 0.3,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userContent },
+      ],
+    });
+
+    if (!plan?.steps?.length) throw new Error("Planner returned no steps");
+    // normalise IDs
+    plan.steps = plan.steps.map((s, i) => ({ id: s.id || `s${i + 1}`, title: s.title }));
+
+    const { data: row, error } = await context.supabase
+      .from("tutor_sessions")
+      .insert({
+        user_id: context.userId,
+        problem_text: data.problem,
+        problem_image_url: data.imageDataUrl ?? null,
+        domain: plan.domain ?? null,
+        difficulty: plan.difficulty ?? null,
+        plan: plan as unknown as never,
+        mode: data.mode,
+      })
+      .select("id")
+      .single();
+
+    if (error) throw new Error(error.message);
+    return { sessionId: row.id as string, plan };
+  });
+
+// ---------- Run next step (executor) ----------
+export const runNextStep = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) =>
+    z.object({ sessionId: z.string().uuid() }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const { callGeminiJSON } = await import("./ai.server");
+    const { verifyResult } = await import("./verify");
+
+    const { data: session, error: sErr } = await context.supabase
+      .from("tutor_sessions")
+      .select("*")
+      .eq("id", data.sessionId)
+      .eq("user_id", context.userId)
+      .single();
+    if (sErr || !session) throw new Error("Session not found");
+
+    const plan = session.plan as unknown as Plan;
+    const history = (session.step_history as unknown as CompletedStep[]) ?? [];
+    const idx = session.current_step_index as number;
+
+    if (idx >= plan.steps.length) {
+      return { done: true, step: null, session };
+    }
+    const currentStep = plan.steps[idx];
+
+    const systemPrompt = `You are the EXECUTOR for a step-by-step math tutor.
+Solve ONLY the current step. Do NOT skip ahead. Do NOT reveal or compute later steps.
+Return strict JSON with fields:
+{
+  "step_id": string,
+  "explanation": string,         // 1-3 short sentences in plain English
+  "calculation": string,         // the math work for this step, LaTeX allowed between $...$
+  "result": string,              // the resulting value or expression of THIS step only
+  "check_expression": string,    // a plain mathjs-evaluable expression whose value equals the numeric result of this step (e.g. "2+3*4"). If the step's result is purely symbolic, return "".
+  "guiding_question": string     // one short question you'd ask a student before revealing the calculation
+}
+Keep it accurate. Use consistent units. Numbers only in check_expression (no words, no LaTeX).`;
+
+    const historyText = history.length
+      ? history
+          .map(
+            (h, i) =>
+              `Step ${i + 1} (${h.title}):\nExplanation: ${h.explanation}\nResult: ${h.result}`,
+          )
+          .join("\n\n")
+      : "(no previous steps yet)";
+
+    const userPrompt = `Problem:\n${session.problem_text}\n\nFull plan:\n${plan.steps
+      .map((s, i) => `${i + 1}. ${s.title}`)
+      .join("\n")}\n\nCompleted so far:\n${historyText}\n\nCurrent step to solve: ${idx + 1}. ${currentStep.title} (id=${currentStep.id})`;
+
+    async function askExecutor() {
+      return callGeminiJSON<{
+        step_id: string;
+        explanation: string;
+        calculation: string;
+        result: string;
+        check_expression: string;
+        guiding_question?: string;
+      }>({
+        model: EXECUTOR_MODEL,
+        temperature: 0.2,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+      });
+    }
+
+    let exec = await askExecutor();
+    let check = verifyResult(exec.result, exec.check_expression);
+    if (check.verified && !check.ok) {
+      // retry once
+      exec = await askExecutor();
+      check = verifyResult(exec.result, exec.check_expression);
+    }
+
+    const completed: CompletedStep = {
+      step_id: currentStep.id,
+      title: currentStep.title,
+      explanation: exec.explanation,
+      calculation: exec.calculation,
+      result: exec.result,
+      check_expression: exec.check_expression,
+      guiding_question: exec.guiding_question,
+      verified: check.verified,
+      verified_ok: check.ok,
+      computed: check.computed,
+    };
+
+    const newHistory = [...history, completed];
+    const newIdx = idx + 1;
+    const isDone = newIdx >= plan.steps.length;
+
+    const { error: uErr } = await context.supabase
+      .from("tutor_sessions")
+      .update({
+        step_history: newHistory as unknown as never,
+        current_step_index: newIdx,
+        status: isDone ? "complete" : "in_progress",
+        final_answer: isDone ? completed.result : null,
+      })
+      .eq("id", data.sessionId);
+    if (uErr) throw new Error(uErr.message);
+
+    return { done: isDone, step: completed, currentIndex: newIdx };
+  });
+
+// ---------- Explain step ----------
+export const explainStep = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) =>
+    z
+      .object({
+        sessionId: z.string().uuid(),
+        stepId: z.string(),
+        question: z.string().min(1).max(1000),
+      })
+      .parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const { callGeminiText } = await import("./ai.server");
+
+    const { data: session, error } = await context.supabase
+      .from("tutor_sessions")
+      .select("problem_text, plan, step_history")
+      .eq("id", data.sessionId)
+      .eq("user_id", context.userId)
+      .single();
+    if (error || !session) throw new Error("Session not found");
+
+    const history = (session.step_history as unknown as CompletedStep[]) ?? [];
+    const step = history.find((h) => h.step_id === data.stepId);
+    if (!step) throw new Error("Step not found");
+
+    const answer = await callGeminiText({
+      model: EXECUTOR_MODEL,
+      temperature: 0.5,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a patient math tutor. Re-explain the given step clearly and briefly, answering the student's question. Keep it under 6 sentences. Use plain English; LaTeX between $...$ only for formulas.",
+        },
+        {
+          role: "user",
+          content: `Problem: ${session.problem_text}\n\nStep title: ${step.title}\nOriginal explanation: ${step.explanation}\nCalculation: ${step.calculation}\nResult: ${step.result}\n\nStudent asks: ${data.question}`,
+        },
+      ],
+    });
+
+    return { answer };
+  });
+
+// ---------- Generate similar practice problem ----------
+export const similarProblem = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) =>
+    z.object({ sessionId: z.string().uuid() }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const { callGeminiText } = await import("./ai.server");
+
+    const { data: session, error } = await context.supabase
+      .from("tutor_sessions")
+      .select("problem_text, domain, difficulty")
+      .eq("id", data.sessionId)
+      .eq("user_id", context.userId)
+      .single();
+    if (error || !session) throw new Error("Session not found");
+
+    const problem = await callGeminiText({
+      model: EXECUTOR_MODEL,
+      temperature: 0.8,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You generate practice problems. Given an original problem, produce ONE new problem of similar topic and difficulty. Return ONLY the problem text — no solution, no numbering, no preamble.",
+        },
+        {
+          role: "user",
+          content: `Original problem: ${session.problem_text}\nTopic: ${session.domain ?? "math"}\nDifficulty: ${session.difficulty ?? "medium"}`,
+        },
+      ],
+    });
+    return { problem: problem.trim() };
+  });
+
+// ---------- Session read helpers ----------
+export const getSession = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) =>
+    z.object({ sessionId: z.string().uuid() }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: row, error } = await context.supabase
+      .from("tutor_sessions")
+      .select("*")
+      .eq("id", data.sessionId)
+      .eq("user_id", context.userId)
+      .single();
+    if (error) throw new Error(error.message);
+    return row;
+  });
+
+export const listSessions = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data, error } = await context.supabase
+      .from("tutor_sessions")
+      .select("id, problem_text, created_at, status, current_step_index, plan")
+      .eq("user_id", context.userId)
+      .order("created_at", { ascending: false })
+      .limit(50);
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  });
+
+export const setSessionMode = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) =>
+    z
+      .object({
+        sessionId: z.string().uuid(),
+        mode: z.enum(["guided", "direct"]),
+      })
+      .parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const { error } = await context.supabase
+      .from("tutor_sessions")
+      .update({ mode: data.mode })
+      .eq("id", data.sessionId)
+      .eq("user_id", context.userId);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
