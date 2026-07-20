@@ -214,10 +214,35 @@ function StepItem(props: {
 }) {
   const { index, title, completed, isCurrent, loading, onReveal, guidedHidden } = props;
   const explain = useServerFn(explainStep);
+  const checkAnswer = useServerFn(checkGuidedAnswer);
   const [asking, setAsking] = useState(false);
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState<string | null>(null);
-  const [studentThought, setStudentThought] = useState("");
+  const [studentAnswer, setStudentAnswer] = useState("");
+  const [checking, setChecking] = useState(false);
+  const [feedback, setFeedback] = useState<{
+    verdict: "correct" | "partial" | "incorrect";
+    feedback: string;
+  } | null>(null);
+
+  async function submitGuidedAnswer() {
+    if (!completed || !studentAnswer.trim()) return;
+    setChecking(true);
+    try {
+      const r = await checkAnswer({
+        data: {
+          sessionId: props.sessionId,
+          stepId: completed.step_id,
+          answer: studentAnswer,
+        },
+      });
+      setFeedback(r);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setChecking(false);
+    }
+  }
 
   async function ask() {
     if (!completed || !question.trim()) return;
