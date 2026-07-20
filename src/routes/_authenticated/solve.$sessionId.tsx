@@ -54,8 +54,7 @@ function SolvePage() {
 
   const [session, setSession] = useState<SessionRow | null>(null);
   const [loadingStep, setLoadingStep] = useState(false);
-  const [pendingGuided, setPendingGuided] = useState<{ question: string } | null>(null);
-  const [studentAnswer, setStudentAnswer] = useState("");
+  const [justRevealedId, setJustRevealedId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     const s = (await load({ data: { sessionId } })) as unknown as SessionRow;
@@ -68,19 +67,14 @@ function SolvePage() {
 
   const total = session?.plan?.steps?.length ?? 0;
   const done = session?.current_step_index ?? 0;
-  const isComplete = session && done >= total && total > 0;
+  const isComplete = !!session && done >= total && total > 0;
 
   async function revealNext() {
     if (!session) return;
-    // If guided mode and no pending guided question shown, ask executor first only for the question.
-    // Simplification: we call executor and then show guiding_question first, then user reveals.
     setLoadingStep(true);
     try {
       const res = await nextStep({ data: { sessionId } });
-      if (session.mode === "guided" && res.step?.guiding_question && !pendingGuided) {
-        // Add the step but withhold until user answers
-        setPendingGuided({ question: res.step.guiding_question });
-      }
+      if (res.step) setJustRevealedId(res.step.step_id);
       await refresh();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed");
@@ -100,9 +94,7 @@ function SolvePage() {
     toast.info("Generating a similar problem…");
     try {
       const { problem } = await similar({ data: { sessionId } });
-      const res = await createNew({
-        data: { problem, mode: session.mode },
-      });
+      const res = await createNew({ data: { problem, mode: session.mode } });
       navigate({ to: "/solve/$sessionId", params: { sessionId: res.sessionId } });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed");
@@ -167,6 +159,11 @@ function SolvePage() {
           {session.plan?.steps?.map((s, i) => {
             const completed = session.step_history[i];
             const isCurrent = i === done && !isComplete;
+            const guidedHidden =
+              !!completed &&
+              session.mode === "guided" &&
+              completed.step_id === justRevealedId &&
+              !!completed.guiding_question;
             return (
               <StepItem
                 key={s.id}
@@ -175,14 +172,8 @@ function SolvePage() {
                 completed={completed}
                 isCurrent={isCurrent}
                 sessionId={sessionId}
-                mode={session.mode}
-                pendingGuided={isCurrent ? pendingGuided : null}
-                studentAnswer={studentAnswer}
-                setStudentAnswer={setStudentAnswer}
-                onRevealCalculation={() => {
-                  setPendingGuided(null);
-                  setStudentAnswer("");
-                }}
+                guidedHidden={guidedHidden}
+                onRevealCalc={() => setJustRevealedId(null)}
                 onReveal={revealNext}
                 loading={loadingStep}
               />
@@ -190,14 +181,14 @@ function SolvePage() {
           })}
         </ol>
 
-        {isComplete && (
+        {isComplete && session.final_answer && (
           <div className="mt-10 rounded-2xl border-2 border-primary/20 bg-primary/5 p-6">
             <div className="flex items-center gap-2 text-primary">
               <Sparkles className="h-5 w-5" />
               <p className="text-sm font-medium uppercase tracking-wide">Final answer</p>
             </div>
             <div className="mt-3 font-serif-display text-3xl font-semibold">
-              <MathText text={session.final_answer ?? ""} />
+              <MathText text={session.final_answer} />
             </div>
             <div className="mt-6">
               <Button onClick={onSimilar}>Generate a similar practice problem</Button>
@@ -217,22 +208,15 @@ function StepItem(props: {
   loading: boolean;
   onReveal: () => void;
   sessionId: string;
-  mode: "guided" | "direct";
-  pendingGuided: { question: string } | null;
-  studentAnswer: string;
-  setStudentAnswer: (s: string) => void;
-  onRevealCalculation: () => void;
+  guidedHidden: boolean;
+  onRevealCalc: () => void;
 }) {
-  const { index, title, completed, isCurrent, loading, onReveal } = props;
+  const { index, title, completed, isCurrent, loading, onReveal, guidedHidden } = props;
   const explain = useServerFn(explainStep);
   const [asking, setAsking] = useState(false);
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState<string | null>(null);
-  const [showCalc, setShowCalc] = useState(true);
-
-  // In guided mode, hide calc until student answers
-  const guidedHidden =
-    completed && props.mode === "guided" && props.pendingGuided != null && !showCalc;
+  const [studentThought, setStudentThought] = useState("");
 
   async function ask() {
     if (!completed || !question.trim()) return;
@@ -242,6 +226,7 @@ function StepItem(props: {
         data: { sessionId: props.sessionId, stepId: completed.step_id, question },
       });
       setAnswer(r.answer);
+      setQuestion("");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed");
     } finally {
@@ -280,52 +265,40 @@ function StepItem(props: {
 
   return (
     <li className="rounded-xl border bg-card p-6 shadow-sm">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
-            <span>Step {index + 1}</span>
-            {completed.verified && completed.verified_ok && (
-              <span className="inline-flex items-center gap-1 text-success">
-                <CheckCircle2 className="h-3.5 w-3.5" /> verified
-              </span>
-            )}
-            {completed.verified && !completed.verified_ok && (
-              <span className="inline-flex items-center gap-1 text-warning">
-                <AlertTriangle className="h-3.5 w-3.5" /> check flagged
-              </span>
-            )}
-          </div>
-          <p className="mt-1 font-medium">{completed.title}</p>
-        </div>
+      <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
+        <span>Step {index + 1}</span>
+        {completed.verified && completed.verified_ok && (
+          <span className="inline-flex items-center gap-1 text-success">
+            <CheckCircle2 className="h-3.5 w-3.5" /> verified
+          </span>
+        )}
+        {completed.verified && !completed.verified_ok && (
+          <span className="inline-flex items-center gap-1 text-warning">
+            <AlertTriangle className="h-3.5 w-3.5" /> check flagged
+          </span>
+        )}
       </div>
+      <p className="mt-1 font-medium">{completed.title}</p>
 
-      {props.mode === "guided" && props.pendingGuided && !showCalc && (
+      {guidedHidden ? (
         <div className="mt-4 rounded-lg border border-primary/30 bg-primary/5 p-4">
           <p className="text-sm font-medium">Before we go on…</p>
-          <p className="mt-1 text-sm">{props.pendingGuided.question}</p>
+          <p className="mt-1 text-sm">{completed.guiding_question}</p>
           <Textarea
-            value={props.studentAnswer}
-            onChange={(e) => props.setStudentAnswer(e.target.value)}
+            value={studentThought}
+            onChange={(e) => setStudentThought(e.target.value)}
             placeholder="Your thought (no wrong answer, just try)"
             className="mt-3 min-h-16 bg-background"
           />
           <div className="mt-3 flex justify-end">
-            <Button
-              size="sm"
-              onClick={() => {
-                setShowCalc(true);
-                props.onRevealCalculation();
-              }}
-            >
+            <Button size="sm" onClick={props.onRevealCalc}>
               Show the solution
             </Button>
           </div>
         </div>
-      )}
-
-      {!guidedHidden && (
+      ) : (
         <>
-          <div className="mt-4 text-[15px] leading-relaxed">
+          <div className="mt-3 text-[15px] leading-relaxed">
             <MathText text={completed.explanation} />
           </div>
           {completed.calculation && (
@@ -339,40 +312,37 @@ function StepItem(props: {
               <MathText text={completed.result} />
             </span>
           </div>
+
+          <div className="mt-4 border-t pt-4">
+            {answer && (
+              <div className="mb-3 rounded-lg bg-accent/40 p-3 text-sm">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <MessageCircle className="h-3.5 w-3.5" /> Re-explanation
+                </div>
+                <div className="mt-1">
+                  <MathText text={answer} />
+                </div>
+              </div>
+            )}
+            {asking ? (
+              <div className="flex items-center text-sm text-muted-foreground">
+                <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> thinking…
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <Textarea
+                  value={question}
+                  onChange={(e) => setQuestion(e.target.value)}
+                  placeholder="Why did you do that? Ask anything about this step…"
+                  className="min-h-10 flex-1 bg-background"
+                />
+                <Button size="sm" variant="outline" onClick={ask} disabled={!question.trim()}>
+                  <HelpCircle className="mr-1 h-4 w-4" /> Ask
+                </Button>
+              </div>
+            )}
+          </div>
         </>
-      )}
-
-      {completed && !guidedHidden && (
-        <div className="mt-4 border-t pt-4">
-          {answer ? (
-            <div className="rounded-lg bg-accent/40 p-3 text-sm">
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <MessageCircle className="h-3.5 w-3.5" /> Re-explanation
-              </div>
-              <div className="mt-1">
-                <MathText text={answer} />
-              </div>
-            </div>
-          ) : null}
-
-          {asking ? (
-            <div className="mt-2 flex items-center text-sm text-muted-foreground">
-              <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> thinking…
-            </div>
-          ) : (
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <Textarea
-                value={question}
-                onChange={(e) => setQuestion(e.target.value)}
-                placeholder="Why did you do that? Ask anything about this step…"
-                className="min-h-10 flex-1 bg-background"
-              />
-              <Button size="sm" variant="outline" onClick={ask} disabled={!question.trim()}>
-                <HelpCircle className="mr-1 h-4 w-4" /> Ask
-              </Button>
-            </div>
-          )}
-        </div>
       )}
     </li>
   );
