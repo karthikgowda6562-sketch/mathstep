@@ -70,8 +70,7 @@ function SolvePage() {
   const done = session?.current_step_index ?? 0;
   const isComplete = !!session && done >= total && total > 0;
 
-  async function revealNext() {
-    if (!session) return;
+  const revealNext = useCallback(async () => {
     setLoadingStep(true);
     try {
       const res = await nextStep({ data: { sessionId } });
@@ -82,7 +81,16 @@ function SolvePage() {
     } finally {
       setLoadingStep(false);
     }
-  }
+  }, [nextStep, refresh, sessionId]);
+
+  // Auto-reveal steps one after another until the problem is solved
+  useEffect(() => {
+    if (!session) return;
+    if (loadingStep) return;
+    if (total === 0) return;
+    if (done >= total) return;
+    revealNext();
+  }, [session, loadingStep, done, total, revealNext]);
 
   async function toggleGuided(v: boolean) {
     if (!session) return;
