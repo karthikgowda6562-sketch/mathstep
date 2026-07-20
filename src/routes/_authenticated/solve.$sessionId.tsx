@@ -168,11 +168,7 @@ function SolvePage() {
           {session.plan?.steps?.map((s, i) => {
             const completed = session.step_history[i];
             const isCurrent = i === done && !isComplete;
-            const guidedHidden =
-              !!completed &&
-              session.mode === "guided" &&
-              completed.step_id === justRevealedId &&
-              !!completed.guiding_question;
+            const guidedHidden = false;
             return (
               <StepItem
                 key={s.id}
