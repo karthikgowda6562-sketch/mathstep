@@ -70,8 +70,7 @@ function SolvePage() {
   const done = session?.current_step_index ?? 0;
   const isComplete = !!session && done >= total && total > 0;
 
-  async function revealNext() {
-    if (!session) return;
+  const revealNext = useCallback(async () => {
     setLoadingStep(true);
     try {
       const res = await nextStep({ data: { sessionId } });
@@ -82,7 +81,16 @@ function SolvePage() {
     } finally {
       setLoadingStep(false);
     }
-  }
+  }, [nextStep, refresh, sessionId]);
+
+  // Auto-reveal steps one after another until the problem is solved
+  useEffect(() => {
+    if (!session) return;
+    if (loadingStep) return;
+    if (total === 0) return;
+    if (done >= total) return;
+    revealNext();
+  }, [session, loadingStep, done, total, revealNext]);
 
   async function toggleGuided(v: boolean) {
     if (!session) return;
@@ -160,11 +168,7 @@ function SolvePage() {
           {session.plan?.steps?.map((s, i) => {
             const completed = session.step_history[i];
             const isCurrent = i === done && !isComplete;
-            const guidedHidden =
-              !!completed &&
-              session.mode === "guided" &&
-              completed.step_id === justRevealedId &&
-              !!completed.guiding_question;
+            const guidedHidden = false;
             return (
               <StepItem
                 key={s.id}
@@ -273,15 +277,12 @@ function StepItem(props: {
   if (isCurrent && !completed) {
     return (
       <li className="rounded-xl border bg-card p-6 shadow-sm">
-        <p className="text-xs uppercase tracking-wide text-muted-foreground">Up next</p>
+        <p className="text-xs uppercase tracking-wide text-muted-foreground">Working on</p>
         <p className="mt-1 font-medium">
           Step {index + 1}. {title}
         </p>
-        <div className="mt-4">
-          <Button onClick={onReveal} disabled={loading}>
-            {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Reveal this step
-          </Button>
+        <div className="mt-3 flex items-center text-sm text-muted-foreground">
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Solving…
         </div>
       </li>
     );
