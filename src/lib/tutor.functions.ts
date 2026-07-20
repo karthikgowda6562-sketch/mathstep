@@ -243,6 +243,55 @@ export const explainStep = createServerFn({ method: "POST" })
     return { answer };
   });
 
+// ---------- Check student's guided-mode answer ----------
+export const checkGuidedAnswer = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) =>
+    z
+      .object({
+        sessionId: z.string().uuid(),
+        stepId: z.string(),
+        answer: z.string().min(1).max(1000),
+      })
+      .parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const { callGeminiJSON } = await import("./ai.server");
+
+    const { data: session, error } = await context.supabase
+      .from("tutor_sessions")
+      .select("problem_text, step_history")
+      .eq("id", data.sessionId)
+      .eq("user_id", context.userId)
+      .single();
+    if (error || !session) throw new Error("Session not found");
+
+    const history = (session.step_history as unknown as CompletedStep[]) ?? [];
+    const step = history.find((h) => h.step_id === data.stepId);
+    if (!step) throw new Error("Step not found");
+
+    const res = await callGeminiJSON<{
+      verdict: "correct" | "partial" | "incorrect";
+      feedback: string;
+    }>({
+      model: EXECUTOR_MODEL,
+      temperature: 0.2,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a warm, encouraging math tutor grading a student's attempt at ONE step of a problem. Compare their answer to the expected result for this step. Return strict JSON: {\"verdict\": \"correct\"|\"partial\"|\"incorrect\", \"feedback\": string}. Feedback: 1-2 short sentences, kind tone, do NOT reveal the full calculation — nudge them if wrong. LaTeX between $...$ allowed.",
+        },
+        {
+          role: "user",
+          content: `Problem: ${session.problem_text}\n\nStep: ${step.title}\nGuiding question: ${step.guiding_question ?? "(none)"}\nExpected result for this step: ${step.result}\n\nStudent's answer: ${data.answer}`,
+        },
+      ],
+    });
+
+    return res;
+  });
+
 // ---------- Generate similar practice problem ----------
 export const similarProblem = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
