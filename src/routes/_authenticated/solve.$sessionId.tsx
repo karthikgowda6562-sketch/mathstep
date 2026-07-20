@@ -8,6 +8,7 @@ import {
   similarProblem,
   setSessionMode,
   createTutorSession,
+  checkGuidedAnswer,
   type CompletedStep,
   type Plan,
 } from "@/lib/tutor.functions";
