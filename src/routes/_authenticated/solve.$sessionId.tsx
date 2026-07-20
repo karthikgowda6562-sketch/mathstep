@@ -309,14 +309,58 @@ function StepItem(props: {
       {guidedHidden ? (
         <div className="mt-4 rounded-lg border border-primary/30 bg-primary/5 p-4">
           <p className="text-sm font-medium">Before we go on…</p>
-          <p className="mt-1 text-sm">{completed.guiding_question}</p>
+          <div className="mt-1 text-sm">
+            <MathText text={completed.guiding_question ?? ""} />
+          </div>
           <Textarea
-            value={studentThought}
-            onChange={(e) => setStudentThought(e.target.value)}
-            placeholder="Your thought (no wrong answer, just try)"
+            value={studentAnswer}
+            onChange={(e) => setStudentAnswer(e.target.value)}
+            placeholder="Type your answer to the question above"
             className="mt-3 min-h-16 bg-background"
+            disabled={checking}
           />
-          <div className="mt-3 flex justify-end">
+          {feedback && (
+            <div
+              className={`mt-3 rounded-md border p-3 text-sm ${
+                feedback.verdict === "correct"
+                  ? "border-success/40 bg-success/10 text-success-foreground"
+                  : feedback.verdict === "partial"
+                    ? "border-warning/40 bg-warning/10"
+                    : "border-destructive/40 bg-destructive/10"
+              }`}
+            >
+              <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide">
+                {feedback.verdict === "correct" ? (
+                  <>
+                    <CheckCircle2 className="h-3.5 w-3.5" /> Nice — that's right
+                  </>
+                ) : feedback.verdict === "partial" ? (
+                  <>
+                    <AlertTriangle className="h-3.5 w-3.5" /> Almost there
+                  </>
+                ) : (
+                  <>
+                    <AlertTriangle className="h-3.5 w-3.5" /> Not quite
+                  </>
+                )}
+              </div>
+              <div className="mt-1">
+                <MathText text={feedback.feedback} />
+              </div>
+            </div>
+          )}
+          <div className="mt-3 flex flex-wrap justify-end gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={submitGuidedAnswer}
+              disabled={checking || !studentAnswer.trim()}
+            >
+              {checking ? (
+                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+              ) : null}
+              Check my answer
+            </Button>
             <Button size="sm" onClick={props.onRevealCalc}>
               Show the solution
             </Button>
