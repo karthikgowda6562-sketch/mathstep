@@ -277,15 +277,12 @@ function StepItem(props: {
   if (isCurrent && !completed) {
     return (
       <li className="rounded-xl border bg-card p-6 shadow-sm">
-        <p className="text-xs uppercase tracking-wide text-muted-foreground">Up next</p>
+        <p className="text-xs uppercase tracking-wide text-muted-foreground">Working on</p>
         <p className="mt-1 font-medium">
           Step {index + 1}. {title}
         </p>
-        <div className="mt-4">
-          <Button onClick={onReveal} disabled={loading}>
-            {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Reveal this step
-          </Button>
+        <div className="mt-3 flex items-center text-sm text-muted-foreground">
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Solving…
         </div>
       </li>
     );
