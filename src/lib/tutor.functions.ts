@@ -243,7 +243,7 @@ export const explainStep = createServerFn({ method: "POST" })
     if (!step) throw new Error("Step not found");
 
     const answer = await callGeminiText({
-      model: EXECUTOR_MODEL,
+      model: EXPLAIN_MODEL,
       temperature: 0.5,
       messages: [
         {
@@ -328,7 +328,7 @@ export const similarProblem = createServerFn({ method: "POST" })
     if (error || !session) throw new Error("Session not found");
 
     const problem = await callGeminiText({
-      model: EXECUTOR_MODEL,
+      model: EXPLAIN_MODEL,
       temperature: 0.8,
       messages: [
         {
