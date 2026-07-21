@@ -2,8 +2,10 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
-const PLANNER_MODEL = "google/gemini-2.5-flash";
-const EXECUTOR_MODEL = "google/gemini-2.5-flash";
+// Use the strongest available Gemini for accuracy on math reasoning.
+const PLANNER_MODEL = "google/gemini-2.5-pro";
+const EXECUTOR_MODEL = "google/gemini-2.5-pro";
+const EXPLAIN_MODEL = "google/gemini-2.5-flash";
 
 // ---------- Types ----------
 export interface PlanStep {
