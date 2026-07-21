@@ -2,8 +2,10 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
-const PLANNER_MODEL = "google/gemini-2.5-flash";
-const EXECUTOR_MODEL = "google/gemini-2.5-flash";
+// Use the strongest available Gemini for accuracy on math reasoning.
+const PLANNER_MODEL = "google/gemini-2.5-pro";
+const EXECUTOR_MODEL = "google/gemini-2.5-pro";
+const EXPLAIN_MODEL = "google/gemini-2.5-flash";
 
 // ---------- Types ----------
 export interface PlanStep {
@@ -43,11 +45,13 @@ export const createTutorSession = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { callGeminiJSON } = await import("./ai.server");
 
-    const systemPrompt = `You are the PLANNER for a step-by-step math tutor.
-Your ONLY job is to name the steps required to solve the problem.
+    const systemPrompt = `You are the PLANNER for a rigorous step-by-step math tutor.
+Your ONLY job is to name the steps required to solve the problem correctly.
 Do NOT solve the problem. Do NOT reveal intermediate results or the final answer.
+Think carefully about the correct mathematical approach before naming steps. Respect order of operations (PEMDAS/BODMAS), algebraic identities, calculus rules, geometry theorems, and unit consistency.
 Return strict JSON: {"domain": string, "difficulty": "easy"|"medium"|"hard", "steps": [{"id": "s1", "title": "short step name"}]}
-Use 2 to 7 steps. Titles must be short (max 60 chars) and describe WHAT will be done, not the answer.`;
+Use 2 to 8 steps. Titles must be short (max 70 chars) and describe WHAT will be done (e.g. "Apply the quadratic formula", "Isolate x"), not the answer.
+The FINAL step must state or verify the answer (e.g. "State the final answer" or "Verify by substitution").`;
 
     const userContent: Array<
       { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }
@@ -114,33 +118,45 @@ export const runNextStep = createServerFn({ method: "POST" })
     }
     const currentStep = plan.steps[idx];
 
-    const systemPrompt = `You are the EXECUTOR for a step-by-step math tutor.
-Solve ONLY the current step. Do NOT skip ahead. Do NOT reveal or compute later steps.
-Return strict JSON with fields:
+    const systemPrompt = `You are the EXECUTOR for a rigorous step-by-step math tutor. Accuracy is the #1 priority.
+
+Rules of reasoning (follow every time):
+- Think through the step silently before writing. Prefer symbolic manipulation, then substitute numbers.
+- Respect order of operations (PEMDAS/BODMAS). Multiplication/division before addition/subtraction. Parentheses first. Exponents before multiplication.
+- Distribute signs carefully. -(a - b) = -a + b. Watch minus signs on every line.
+- Keep exact values (fractions, radicals, pi, e) whenever possible; only decimal-approximate at the FINAL step, and give at least 4 significant figures.
+- Preserve units. Convert to consistent units before combining. Keep units in the result.
+- Use the CORRECT rules for the domain: quadratic formula, factoring, log/exponent laws, trig identities, derivative/integral rules, geometry theorems, probability axioms, matrix rules, etc.
+- Never invent identities. If unsure, expand from definitions.
+- Independently redo the arithmetic of this step in your head before writing "result".
+- Use ONLY facts established in the completed steps below. Do not skip ahead or assume a later step.
+
+Solve ONLY the current step. Return strict JSON:
 {
   "step_id": string,
-  "explanation": string,         // 1-3 short sentences in plain English
-  "calculation": string,         // the math work for this step, LaTeX allowed between $...$
-  "result": string,              // the resulting value or expression of THIS step only
-  "check_expression": string,    // a plain mathjs-evaluable expression whose value equals the numeric result of this step (e.g. "2+3*4"). If the step's result is purely symbolic, return "".
-  "guiding_question": string     // one short question you'd ask a student before revealing the calculation
+  "explanation": string,        // 1-3 short sentences in plain English, WHY this step is done
+  "calculation": string,        // the math work for this step. Wrap formulas in $...$ (LaTeX). Show intermediate simplification.
+  "result": string,             // the resulting value or expression of THIS step only. Prefer exact form; add "≈ <decimal>" when helpful.
+  "check_expression": string,   // a plain mathjs-evaluable numeric expression whose value equals the numeric value of the step's result (e.g. "(-3 + sqrt(9 - 4*1*-4)) / (2*1)"). No LaTeX, no words, no units. If the result is purely symbolic with unbound variables, return "".
+  "guiding_question": string    // one short question a tutor could ask before showing the calculation
 }
-Keep it accurate. Use consistent units. Numbers only in check_expression (no words, no LaTeX).`;
+
+mathjs syntax for check_expression: use *, /, +, -, ^, sqrt(), abs(), sin/cos/tan (radians), log(x) is natural log, log10(x), pi, e. Substitute concrete numbers for any variable that already has a value from prior steps.`;
 
     const historyText = history.length
       ? history
           .map(
             (h, i) =>
-              `Step ${i + 1} (${h.title}):\nExplanation: ${h.explanation}\nResult: ${h.result}`,
+              `Step ${i + 1} (${h.title}):\nExplanation: ${h.explanation}\nCalculation: ${h.calculation}\nResult: ${h.result}${h.computed != null ? ` (verified numeric ≈ ${h.computed})` : ""}`,
           )
           .join("\n\n")
       : "(no previous steps yet)";
 
-    const userPrompt = `Problem:\n${session.problem_text}\n\nFull plan:\n${plan.steps
+    const basePrompt = `Problem:\n${session.problem_text}\n\nFull plan:\n${plan.steps
       .map((s, i) => `${i + 1}. ${s.title}`)
       .join("\n")}\n\nCompleted so far:\n${historyText}\n\nCurrent step to solve: ${idx + 1}. ${currentStep.title} (id=${currentStep.id})`;
 
-    async function askExecutor() {
+    async function askExecutor(extraNote?: string) {
       return callGeminiJSON<{
         step_id: string;
         explanation: string;
@@ -150,10 +166,10 @@ Keep it accurate. Use consistent units. Numbers only in check_expression (no wor
         guiding_question?: string;
       }>({
         model: EXECUTOR_MODEL,
-        temperature: 0.2,
+        temperature: 0.1,
         messages: [
           { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
+          { role: "user", content: extraNote ? `${basePrompt}\n\nIMPORTANT CORRECTION:\n${extraNote}` : basePrompt },
         ],
       });
     }
@@ -161,10 +177,12 @@ Keep it accurate. Use consistent units. Numbers only in check_expression (no wor
     let exec = await askExecutor();
     let check = verifyResult(exec.result, exec.check_expression);
     if (check.verified && !check.ok) {
-      // retry once
-      exec = await askExecutor();
+      // retry once with explicit feedback about the mismatch
+      const note = `Your previous attempt had an arithmetic mismatch. You wrote result="${exec.result}" but the check_expression "${exec.check_expression}" evaluates to ${check.computed}. Recompute the step carefully. Either fix the result to match a correct check_expression, or fix the check_expression so it truly represents the step's numeric result. Re-derive from scratch.`;
+      exec = await askExecutor(note);
       check = verifyResult(exec.result, exec.check_expression);
     }
+
 
     const completed: CompletedStep = {
       step_id: currentStep.id,
@@ -225,7 +243,7 @@ export const explainStep = createServerFn({ method: "POST" })
     if (!step) throw new Error("Step not found");
 
     const answer = await callGeminiText({
-      model: EXECUTOR_MODEL,
+      model: EXPLAIN_MODEL,
       temperature: 0.5,
       messages: [
         {
@@ -310,7 +328,7 @@ export const similarProblem = createServerFn({ method: "POST" })
     if (error || !session) throw new Error("Session not found");
 
     const problem = await callGeminiText({
-      model: EXECUTOR_MODEL,
+      model: EXPLAIN_MODEL,
       temperature: 0.8,
       messages: [
         {
