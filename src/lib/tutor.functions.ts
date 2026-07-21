@@ -45,11 +45,13 @@ export const createTutorSession = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { callGeminiJSON } = await import("./ai.server");
 
-    const systemPrompt = `You are the PLANNER for a step-by-step math tutor.
-Your ONLY job is to name the steps required to solve the problem.
+    const systemPrompt = `You are the PLANNER for a rigorous step-by-step math tutor.
+Your ONLY job is to name the steps required to solve the problem correctly.
 Do NOT solve the problem. Do NOT reveal intermediate results or the final answer.
+Think carefully about the correct mathematical approach before naming steps. Respect order of operations (PEMDAS/BODMAS), algebraic identities, calculus rules, geometry theorems, and unit consistency.
 Return strict JSON: {"domain": string, "difficulty": "easy"|"medium"|"hard", "steps": [{"id": "s1", "title": "short step name"}]}
-Use 2 to 7 steps. Titles must be short (max 60 chars) and describe WHAT will be done, not the answer.`;
+Use 2 to 8 steps. Titles must be short (max 70 chars) and describe WHAT will be done (e.g. "Apply the quadratic formula", "Isolate x"), not the answer.
+The FINAL step must state or verify the answer (e.g. "State the final answer" or "Verify by substitution").`;
 
     const userContent: Array<
       { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }
