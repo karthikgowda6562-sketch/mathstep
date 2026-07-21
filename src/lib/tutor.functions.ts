@@ -28,6 +28,16 @@ export interface CompletedStep {
   verified: boolean;
   verified_ok: boolean;
   computed?: number | null;
+  verification_warning?: string;
+}
+
+interface ExecutorResponse {
+  step_id: string;
+  explanation: string;
+  calculation: string;
+  result: string;
+  check_expression: string;
+  guiding_question?: string;
 }
 
 // ---------- Create session (planner) ----------
@@ -129,19 +139,21 @@ Rules of reasoning (follow every time):
 - Use the CORRECT rules for the domain: quadratic formula, factoring, log/exponent laws, trig identities, derivative/integral rules, geometry theorems, probability axioms, matrix rules, etc.
 - Never invent identities. If unsure, expand from definitions.
 - Independently redo the arithmetic of this step in your head before writing "result".
+- Show every arithmetic step explicitly, do not skip any calculation.
+- Before finalizing, verify your own result is correct.
 - Use ONLY facts established in the completed steps below. Do not skip ahead or assume a later step.
 
 Solve ONLY the current step. Return strict JSON:
 {
   "step_id": string,
   "explanation": string,        // 1-3 short sentences in plain English, WHY this step is done
-  "calculation": string,        // the math work for this step. Wrap formulas in $...$ (LaTeX). Show intermediate simplification.
+  "calculation": string,        // the math work for this step. Wrap formulas in $...$ (LaTeX). Show every arithmetic simplification explicitly.
   "result": string,             // the resulting value or expression of THIS step only. Prefer exact form; add "≈ <decimal>" when helpful.
-  "check_expression": string,   // a plain mathjs-evaluable numeric expression whose value equals the numeric value of the step's result (e.g. "(-3 + sqrt(9 - 4*1*-4)) / (2*1)"). No LaTeX, no words, no units. If the result is purely symbolic with unbound variables, return "".
+  "check_expression": string,   // a literal, exact, plain mathjs-evaluable expression whose value equals the numeric value of result (e.g. "(12+8)/4"). No LaTeX, no words, no units. For solved variables, use the numeric/exact value only. If the result is purely symbolic with unbound variables, return "".
   "guiding_question": string    // one short question a tutor could ask before showing the calculation
 }
 
-mathjs syntax for check_expression: use *, /, +, -, ^, sqrt(), abs(), sin/cos/tan (radians), log(x) is natural log, log10(x), pi, e. Substitute concrete numbers for any variable that already has a value from prior steps.`;
+mathjs syntax for check_expression: use *, /, +, -, ^, sqrt(), abs(), sin/cos/tan (radians), log(x) is natural log, log10(x), pi, e. Substitute concrete numbers for any variable that already has a value from prior steps. check_expression must be a literal, exact evaluable math expression because it will be checked by a real calculator.`;
 
     const historyText = history.length
       ? history
@@ -157,14 +169,7 @@ mathjs syntax for check_expression: use *, /, +, -, ^, sqrt(), abs(), sin/cos/ta
       .join("\n")}\n\nCompleted so far:\n${historyText}\n\nCurrent step to solve: ${idx + 1}. ${currentStep.title} (id=${currentStep.id})`;
 
     async function askExecutor(extraNote?: string) {
-      return callGeminiJSON<{
-        step_id: string;
-        explanation: string;
-        calculation: string;
-        result: string;
-        check_expression: string;
-        guiding_question?: string;
-      }>({
+      return callGeminiJSON<ExecutorResponse>({
         model: EXECUTOR_MODEL,
         temperature: 0.1,
         messages: [
@@ -176,13 +181,19 @@ mathjs syntax for check_expression: use *, /, +, -, ^, sqrt(), abs(), sin/cos/ta
 
     let exec = await askExecutor();
     let check = verifyResult(exec.result, exec.check_expression);
-    if (check.verified && !check.ok) {
-      // retry once with explicit feedback about the mismatch
-      const note = `Your previous attempt had an arithmetic mismatch. You wrote result="${exec.result}" but the check_expression "${exec.check_expression}" evaluates to ${check.computed}. Recompute the step carefully. Either fix the result to match a correct check_expression, or fix the check_expression so it truly represents the step's numeric result. Re-derive from scratch.`;
+    if (!check.ok) {
+      const note = `Your previous result was wrong. Recheck your work step by step and try again.
+
+Details from the independent calculator: result="${exec.result}"; check_expression="${exec.check_expression}"; computed check value=${check.computed ?? "not evaluable"}; parsed claimed value=${check.claimed ?? "not evaluable"}. The check_expression must be a literal exact math expression that evaluates to the same numeric value as result.`;
       exec = await askExecutor(note);
       check = verifyResult(exec.result, exec.check_expression);
     }
 
+    const verificationWarning = check.ok
+      ? undefined
+      : check.computed == null
+        ? "Please double-check this step — its calculator check could not be evaluated."
+        : "Please double-check this step — its result did not match the calculator check.";
 
     const completed: CompletedStep = {
       step_id: currentStep.id,
@@ -195,6 +206,7 @@ mathjs syntax for check_expression: use *, /, +, -, ^, sqrt(), abs(), sin/cos/ta
       verified: check.verified,
       verified_ok: check.ok,
       computed: check.computed,
+      verification_warning: verificationWarning,
     };
 
     const newHistory = [...history, completed];

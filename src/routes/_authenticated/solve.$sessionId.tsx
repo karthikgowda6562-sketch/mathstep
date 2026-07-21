@@ -299,9 +299,9 @@ function StepItem(props: {
             <CheckCircle2 className="h-3.5 w-3.5" /> verified
           </span>
         )}
-        {completed.verified && !completed.verified_ok && (
-          <span className="inline-flex items-center gap-1 text-warning">
-            <AlertTriangle className="h-3.5 w-3.5" /> check flagged
+        {!completed.verified_ok && (
+          <span className="inline-flex items-center gap-1 text-warning" title={completed.verification_warning ?? "Please double-check this step"}>
+            <AlertTriangle className="h-3.5 w-3.5" /> please double-check this step
           </span>
         )}
       </div>
