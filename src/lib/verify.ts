@@ -61,7 +61,7 @@ function candidateExpressions(claimed: string): string[] {
 
   // Pull out expression-like chunks, ignoring surrounding words/units.
   const expressionMatches = normalized.match(
-    /(?:sqrt|abs|sin|cos|tan|log10|log|pi|e|[-+*/^().\d\s])+/gi,
+    /(?:sqrt\s*\([^)]*\)|abs\s*\([^)]*\)|sin\s*\([^)]*\)|cos\s*\([^)]*\)|tan\s*\([^)]*\)|log10\s*\([^)]*\)|log\s*\([^)]*\)|\bpi\b|\be\b|[-+*/^().\d\s])+/gi,
   );
   expressionMatches?.forEach(add);
 
