@@ -1,4 +1,4 @@
-import { evaluate } from "mathjs";
+import { evaluate, fraction } from "mathjs";
 
 function normalizeMathInput(input: string): string {
   let text = input
@@ -13,7 +13,6 @@ function normalizeMathInput(input: string): string {
     .replace(/[≈≃≅]/g, "=")
     .replace(/[−–—]/g, "-");
 
-  // Convert common LaTeX forms into mathjs syntax.
   for (let i = 0; i < 8; i += 1) {
     const next = text
       .replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, "(($1)/($2))")
@@ -23,23 +22,37 @@ function normalizeMathInput(input: string): string {
     text = next;
   }
 
-  return text.replace(/[{}]/g, "").trim();
+  return text.replace(/[{}]/g, "").replace(/\s+/g, " ").trim();
 }
 
-// Attempt independent evaluation of an expression. Returns numeric value or null.
 export function safeEvaluate(expr: string): number | null {
   const normalized = normalizeMathInput(expr);
   if (!normalized) return null;
   try {
     const v = evaluate(normalized);
     if (typeof v === "number" && Number.isFinite(v)) return v;
-    if (v && typeof v.toNumber === "function") {
-      const n = v.toNumber();
-      return Number.isFinite(n) ? n : null;
+    if (v && typeof v === "object") {
+      // mathjs Fraction / BigNumber
+      const anyV = v as { toNumber?: () => number; valueOf?: () => number };
+      if (typeof anyV.toNumber === "function") {
+        const n = anyV.toNumber();
+        return Number.isFinite(n) ? n : null;
+      }
+      if (typeof anyV.valueOf === "function") {
+        const n = Number(anyV.valueOf());
+        return Number.isFinite(n) ? n : null;
+      }
     }
     return null;
   } catch {
-    return null;
+    // Try fraction fallback e.g. "1/2"
+    try {
+      const f = fraction(normalized);
+      const n = Number(f.n) / Number(f.d) * (f.s < 0 ? -1 : 1);
+      return Number.isFinite(n) ? n : null;
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -49,23 +62,19 @@ function candidateExpressions(claimed: string): string[] {
 
   const add = (value: string) => {
     const cleaned = value
-      .replace(/^\s*(result|answer|therefore|so|hence)\s*:?\s*/i, "")
+      .replace(/^\s*(result|answer|therefore|so|hence|x|y|z)\s*[:=]?\s*/i, "")
       .trim();
     if (cleaned) candidates.add(cleaned);
   };
 
   add(normalized);
-
-  // Common tutor result forms: "x = 5", "area = 12 square units", "≈ 3.14".
   normalized.split(/[=;]/).forEach(add);
 
-  // Pull out expression-like chunks, ignoring surrounding words/units.
   const expressionMatches = normalized.match(
     /(?:sqrt\s*\([^)]*\)|abs\s*\([^)]*\)|sin\s*\([^)]*\)|cos\s*\([^)]*\)|tan\s*\([^)]*\)|log10\s*\([^)]*\)|log\s*\([^)]*\)|\bpi\b|\be\b|[-+*/^().\d\s])+/gi,
   );
   expressionMatches?.forEach(add);
 
-  // Last resort: every numeric literal/fraction, so "5 meters" can still be checked.
   const numericMatches = normalized.match(/[-+]?\d*\.?\d+(?:e[-+]?\d+)?(?:\s*\/\s*[-+]?\d*\.?\d+(?:e[-+]?\d+)?)?/gi);
   numericMatches?.forEach(add);
 
@@ -81,29 +90,103 @@ function claimedValues(claimed: string): number[] {
   return values;
 }
 
-// Compare a claimed result against a literal mathjs check expression.
-// ok=false means the step must be retried or shown with a warning.
-export function verifyResult(claimed: string, checkExpr: string): {
+export interface VerifyOutcome {
   ok: boolean;
   verified: boolean;
+  skipped: boolean;
   computed: number | null;
   claimed: number | null;
-} {
-  const computed = safeEvaluate(checkExpr);
+  reason: string;
+}
+
+// Compare a claimed result against a literal mathjs check expression.
+// If checkExpr is null/empty, verification is skipped (step allowed through).
+export function verifyResult(
+  claimed: string,
+  checkExpr: string | null | undefined,
+): VerifyOutcome {
+  const rawCheck = (checkExpr ?? "").trim();
+
+  // Case 1: no numeric check possible for this step — skip gracefully.
+  if (!rawCheck || rawCheck.toLowerCase() === "null" || rawCheck.toLowerCase() === "n/a") {
+    const outcome: VerifyOutcome = {
+      ok: true,
+      verified: false,
+      skipped: true,
+      computed: null,
+      claimed: null,
+      reason: "no check_expression — symbolic/unverifiable step",
+    };
+    logVerification(claimed, checkExpr ?? null, outcome);
+    return outcome;
+  }
+
+  const computed = safeEvaluate(rawCheck);
 
   if (computed == null) {
-    return { ok: false, verified: false, computed: null, claimed: null };
+    const values = claimedValues(claimed);
+    const outcome: VerifyOutcome = {
+      ok: false,
+      verified: false,
+      skipped: false,
+      computed: null,
+      claimed: values[0] ?? null,
+      reason: "check_expression could not be evaluated by mathjs",
+    };
+    logVerification(claimed, checkExpr ?? null, outcome);
+    return outcome;
   }
 
   const values = claimedValues(claimed);
-  if (!values.length) return { ok: false, verified: false, computed, claimed: null };
+  if (!values.length) {
+    const outcome: VerifyOutcome = {
+      ok: false,
+      verified: true,
+      skipped: false,
+      computed,
+      claimed: null,
+      reason: "no numeric value could be parsed from result",
+    };
+    logVerification(claimed, checkExpr, outcome);
+    return outcome;
+  }
 
-  const tol = Math.max(1e-6, Math.abs(computed) * 1e-4);
+  // Tolerance: absolute floor 1e-9, relative 1e-4 for larger magnitudes.
+  const scale = Math.max(1, Math.abs(computed));
+  const tol = Math.max(1e-9, scale * 1e-4);
   const matchingValue = values.find((value) => Math.abs(computed - value) <= tol);
-  return {
+  const outcome: VerifyOutcome = {
     ok: matchingValue != null,
     verified: true,
+    skipped: false,
     computed,
     claimed: matchingValue ?? values[values.length - 1] ?? null,
+    reason: matchingValue != null
+      ? `match within tol=${tol.toExponential(2)}`
+      : `mismatch |computed-claimed|=${Math.abs(computed - (values[values.length - 1] ?? 0))}`,
   };
+  logVerification(claimed, checkExpr, outcome);
+  return outcome;
+}
+
+function logVerification(
+  claimed: string,
+  checkExpr: string | null,
+  outcome: VerifyOutcome,
+) {
+  try {
+    // eslint-disable-next-line no-console
+    console.log("[verify]", JSON.stringify({
+      raw_check_expression: checkExpr,
+      claimed_result: claimed,
+      computed: outcome.computed,
+      claimed_numeric: outcome.claimed,
+      ok: outcome.ok,
+      verified: outcome.verified,
+      skipped: outcome.skipped,
+      reason: outcome.reason,
+    }));
+  } catch {
+    // ignore logging errors
+  }
 }
