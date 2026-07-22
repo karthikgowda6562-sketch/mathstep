@@ -299,10 +299,18 @@ function StepItem(props: {
             <CheckCircle2 className="h-3.5 w-3.5" /> verified
           </span>
         )}
-        {!completed.verified_ok && (
+        {completed.skipped && (
+          <span className="inline-flex items-center gap-1 text-muted-foreground" title="This step is symbolic — no numeric calculator check applies.">
+            symbolic step (no numeric check)
+          </span>
+        )}
+        {!completed.verified_ok && !completed.skipped && (
           <span className="inline-flex items-center gap-1 text-warning" title={completed.verification_warning ?? "Please double-check this step"}>
             <AlertTriangle className="h-3.5 w-3.5" /> please double-check this step
           </span>
+        )}
+        {completed.retried && (
+          <span className="text-muted-foreground" title="Executor was auto-retried after a failed calculator check.">· auto-retried</span>
         )}
       </div>
       <p className="mt-1 font-medium">{completed.title}</p>
