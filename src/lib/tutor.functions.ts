@@ -144,10 +144,81 @@ async function solveWithAi(
   });
 }
 
+function formatNumber(v: number): string {
+  return Math.abs(v - Math.round(v)) < 1e-9 ? String(Math.round(v)) : String(Number(v.toFixed(6)));
+}
+
+function serializeMatrix(m: number[][]): string {
+  return `[${m.map((row) => `[${row.map(formatNumber).join(",")}]`).join(",")}]`;
+}
+
 async function precomputeSteps(sol: AiSolution): Promise<PrecomputedStep[]> {
-  const { safeEvaluate } = await import("./verify");
+  const { safeEvaluate, safeEvaluateMatrix } = await import("./verify");
   const trimmed = (sol.steps ?? []).slice(0, 3);
-  return trimmed.map((s, i) => {
+  return trimmed.map((s, i): PrecomputedStep => {
+    // Infer result_type if the model forgot it: matrix_expression → matrix,
+    // list_items → list, else scalar.
+    let kind: StepResultType = s.result_type ?? "scalar";
+    if (!s.result_type) {
+      if (s.matrix_expression && s.matrix_expression.trim()) kind = "matrix";
+      else if (s.list_items && s.list_items.length) kind = "list";
+    }
+
+    const base = {
+      id: `s${i + 1}`,
+      title: s.title,
+      explanation: s.explanation,
+    };
+
+    if (kind === "matrix") {
+      const expr = (s.matrix_expression ?? "").trim();
+      const matrix = expr ? safeEvaluateMatrix(expr) : null;
+      if (matrix) {
+        return {
+          ...base,
+          calculation: expr ? `$${expr}$` : "",
+          result: serializeMatrix(matrix),
+          check_expression: expr || null,
+          computed: null,
+          result_type: "matrix",
+          result_matrix: matrix,
+        };
+      }
+      return {
+        ...base,
+        calculation: expr ? `$${expr}$` : "",
+        result: "",
+        check_expression: expr || null,
+        computed: null,
+        eval_error: "mathjs could not evaluate this matrix expression",
+        result_type: "matrix",
+      };
+    }
+
+    if (kind === "list") {
+      const items = (s.list_items ?? []).map((it) => {
+        const expr = (it.mathjs_expression ?? "").trim();
+        const v = expr ? safeEvaluate(expr) : null;
+        return {
+          label: it.label,
+          value: v == null ? (expr || "?") : formatNumber(v),
+          computed: v,
+        };
+      });
+      const anyBad = items.some((it) => it.computed == null);
+      return {
+        ...base,
+        calculation: "",
+        result: items.map((it) => `${it.label}: ${it.value}`).join(", "),
+        check_expression: null,
+        computed: null,
+        result_type: "list",
+        result_list: items,
+        eval_error: anyBad ? "one or more list items could not be evaluated" : undefined,
+      };
+    }
+
+    // scalar (default)
     const expr = (s.mathjs_expression ?? "").trim();
     let result = "";
     let computed: number | null = null;
@@ -160,20 +231,18 @@ async function precomputeSteps(sol: AiSolution): Promise<PrecomputedStep[]> {
         calculation = `$${expr}$`;
       } else {
         computed = v;
-        const rounded = Math.abs(v - Math.round(v)) < 1e-9 ? Math.round(v) : Number(v.toFixed(6));
-        result = String(rounded);
-        calculation = `$${expr} = ${rounded}$`;
+        result = formatNumber(v);
+        calculation = `$${expr} = ${result}$`;
       }
     }
     return {
-      id: `s${i + 1}`,
-      title: s.title,
-      explanation: s.explanation,
+      ...base,
       calculation,
       result,
       check_expression: expr || null,
       computed,
       eval_error,
+      result_type: "scalar",
     };
   });
 }
