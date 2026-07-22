@@ -112,6 +112,24 @@ function renderBareMathInText(text: string, keyPrefix: string) {
     const start = match.index;
     const end = start + raw.length;
 
+    // Reject false positives inside plain English text (e.g. "top-left",
+    // "bottom-right"). We only treat a bare run as math if it contains a real
+    // math signal (a digit, backslash command, ^, _, or braces) AND it isn't
+    // embedded inside a surrounding word on either side.
+    const before = start > 0 ? text[start - 1] : "";
+    const after = end < text.length ? text[end] : "";
+    const firstChar = raw[0];
+    const lastChar = raw[raw.length - 1];
+    const embeddedInWord =
+      (/[A-Za-z]/.test(before) && /[A-Za-z]/.test(firstChar)) ||
+      (/[A-Za-z]/.test(after) && /[A-Za-z]/.test(lastChar));
+    const hasMathSignal = /[\d\\^_{}]/.test(raw);
+    if (!hasMathSignal || embeddedInWord) {
+      // Advance past this match without treating it as math so we don't
+      // corrupt plain English words like "left", "right", "top", "bottom".
+      continue;
+    }
+
     if (start > lastIndex) {
       nodes.push(<span key={`${keyPrefix}-text-${lastIndex}`}>{text.slice(lastIndex, start)}</span>);
     }

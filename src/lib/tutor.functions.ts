@@ -20,6 +20,12 @@ export interface Plan {
   steps: PlanStep[];
   precomputed?: PrecomputedStep[];
 }
+export type StepResultType = "scalar" | "matrix" | "list";
+export interface ResultListItem {
+  label: string;
+  value: string;
+  computed?: number | null;
+}
 export interface PrecomputedStep {
   id: string;
   title: string;
@@ -30,6 +36,9 @@ export interface PrecomputedStep {
   guiding_question?: string;
   computed?: number | null;
   eval_error?: string;
+  result_type: StepResultType;
+  result_matrix?: number[][];
+  result_list?: ResultListItem[];
 }
 export interface CompletedStep {
   step_id: string;
@@ -45,15 +54,22 @@ export interface CompletedStep {
   retried?: boolean;
   computed?: number | null;
   verification_warning?: string;
+  result_type?: StepResultType;
+  result_matrix?: number[][];
+  result_list?: ResultListItem[];
 }
 
+interface AiSolutionStep {
+  title: string;
+  explanation: string;
+  result_type?: StepResultType;
+  mathjs_expression?: string;
+  matrix_expression?: string;
+  list_items?: Array<{ label: string; mathjs_expression: string }>;
+}
 interface AiSolution {
   summary: string;
-  steps: Array<{
-    title: string;
-    explanation: string;
-    mathjs_expression: string;
-  }>;
+  steps: AiSolutionStep[];
 }
 
 const SOLVER_SYSTEM_PROMPT = `You are an ultra-fast, highly accurate math assistant designed to solve problems instantly for beginners. Your goal is to break down the solution into the most direct, straightforward path possible.
@@ -62,25 +78,40 @@ You MUST adhere strictly to the following rules:
 
 1. MAXIMUM 3 STEPS: Compress the solution into 2 or 3 steps at most. Combine minor arithmetic operations into a single step. Do not drag out the solution.
 
-2. BEGINNER-ORIENTED EXPLANATIONS: Explain the logic in plain, everyday language. Do not use advanced mathematical jargon, complex theorems, or abstract formatting unless explicitly required by the problem. Keep it short and easy to read.
+2. BEGINNER-ORIENTED EXPLANATIONS: Explain the logic in plain, everyday language. Do not use advanced mathematical jargon or textbook phrasing. Keep it short and easy to read.
 
-3. 100% ACCURACY VIA DELEGATION: You are prone to arithmetic errors, so you must NEVER calculate final numerical answers yourself. Instead, formulate the exact mathematical expression for each step and provide it in the \`mathjs_expression\` field. The backend engine will calculate the final result.
+3. 100% ACCURACY VIA DELEGATION: NEVER compute final numerical values yourself. Provide a mathjs expression and let the backend evaluate it. The backend will fill in the actual number.
 
-4. ELEMENTARY METHODS FIRST: Always prefer basic arithmetic and simple algebra over advanced formulas.
+4. ELEMENTARY METHODS FIRST: Prefer basic arithmetic and simple algebra over advanced formulas.
 
-Formatting for math inside "explanation": wrap any LaTeX math in $...$ (inline). Never use \\begin{align} or multi-line environments.
+Formatting for math inside "explanation": wrap any LaTeX math in $...$ (inline). Never use \\begin{align} or multi-line environments. Use plain hyphens for words like "top-left" and never wrap English words in math delimiters.
 
-The mathjs_expression must be a raw evaluable arithmetic expression using ONLY numbers and operators (+ - * / ^ ( ) sqrt() abs() sin() cos() tan() log() log10() and constants pi, e). No variables, no equals signs, no words, no units, no LaTeX. If a step is purely explanatory with no calculation, use an empty string.
+Each step MUST have a "result_type" of exactly one of: "scalar", "matrix", or "list".
 
-Respond ONLY with a valid JSON object matching this exact structure:
+- "scalar": the step produces a single number.
+    Provide "mathjs_expression" as a raw arithmetic expression using ONLY numbers and operators (+ - * / ^ ( ) sqrt abs sin cos tan log log10 pi e). No variables, equals signs, words, units, or LaTeX. If the step is purely explanatory with no calculation, use an empty string.
+    Omit matrix_expression and list_items (or leave them empty).
+
+- "matrix": the step produces a 2D matrix (e.g. matrix addition, multiplication, transpose, inverse).
+    Provide "matrix_expression" as a raw mathjs expression that evaluates to a 2D matrix, e.g. "[[1,2],[3,4]] + [[5,6],[7,8]]" or "inv([[1,2],[3,4]])" or "transpose([[1,2],[3,4]])". Use commas inside the matrix literals.
+    Leave "mathjs_expression" empty. The backend evaluates the matrix and renders it as a grid — do not describe individual cells inside the explanation.
+
+- "list": the step produces several distinct scalar values at once (e.g. "find each entry").
+    Provide "list_items" as an array of {"label": "...", "mathjs_expression": "..."} objects, one per computed value.
+    Leave "mathjs_expression" empty. The backend evaluates each item and shows them as a labeled list.
+
+Respond ONLY with a valid JSON object of this shape:
 
 {
-  "summary": "A 1-sentence, simple English overview of how we will solve this.",
+  "summary": "1-sentence plain-English overview.",
   "steps": [
     {
-      "title": "Short title of the step (e.g., 'Find the total cost')",
-      "explanation": "A simple, beginner-friendly explanation of the logic for this step.",
-      "mathjs_expression": "The exact arithmetic expression for mathjs to evaluate (e.g., '15 * (24.50 + 5)'). Leave empty string if no calculation is needed."
+      "title": "Short title of the step",
+      "explanation": "Beginner-friendly explanation.",
+      "result_type": "scalar" | "matrix" | "list",
+      "mathjs_expression": "..." ,
+      "matrix_expression": "..." ,
+      "list_items": [{"label": "...", "mathjs_expression": "..."}]
     }
   ]
 }`;
@@ -113,10 +144,81 @@ async function solveWithAi(
   });
 }
 
+function formatNumber(v: number): string {
+  return Math.abs(v - Math.round(v)) < 1e-9 ? String(Math.round(v)) : String(Number(v.toFixed(6)));
+}
+
+function serializeMatrix(m: number[][]): string {
+  return `[${m.map((row) => `[${row.map(formatNumber).join(",")}]`).join(",")}]`;
+}
+
 async function precomputeSteps(sol: AiSolution): Promise<PrecomputedStep[]> {
-  const { safeEvaluate } = await import("./verify");
+  const { safeEvaluate, safeEvaluateMatrix } = await import("./verify");
   const trimmed = (sol.steps ?? []).slice(0, 3);
-  return trimmed.map((s, i) => {
+  return trimmed.map((s, i): PrecomputedStep => {
+    // Infer result_type if the model forgot it: matrix_expression → matrix,
+    // list_items → list, else scalar.
+    let kind: StepResultType = s.result_type ?? "scalar";
+    if (!s.result_type) {
+      if (s.matrix_expression && s.matrix_expression.trim()) kind = "matrix";
+      else if (s.list_items && s.list_items.length) kind = "list";
+    }
+
+    const base = {
+      id: `s${i + 1}`,
+      title: s.title,
+      explanation: s.explanation,
+    };
+
+    if (kind === "matrix") {
+      const expr = (s.matrix_expression ?? "").trim();
+      const matrix = expr ? safeEvaluateMatrix(expr) : null;
+      if (matrix) {
+        return {
+          ...base,
+          calculation: expr ? `$${expr}$` : "",
+          result: serializeMatrix(matrix),
+          check_expression: expr || null,
+          computed: null,
+          result_type: "matrix",
+          result_matrix: matrix,
+        };
+      }
+      return {
+        ...base,
+        calculation: expr ? `$${expr}$` : "",
+        result: "",
+        check_expression: expr || null,
+        computed: null,
+        eval_error: "mathjs could not evaluate this matrix expression",
+        result_type: "matrix",
+      };
+    }
+
+    if (kind === "list") {
+      const items = (s.list_items ?? []).map((it) => {
+        const expr = (it.mathjs_expression ?? "").trim();
+        const v = expr ? safeEvaluate(expr) : null;
+        return {
+          label: it.label,
+          value: v == null ? (expr || "?") : formatNumber(v),
+          computed: v,
+        };
+      });
+      const anyBad = items.some((it) => it.computed == null);
+      return {
+        ...base,
+        calculation: "",
+        result: items.map((it) => `${it.label}: ${it.value}`).join(", "),
+        check_expression: null,
+        computed: null,
+        result_type: "list",
+        result_list: items,
+        eval_error: anyBad ? "one or more list items could not be evaluated" : undefined,
+      };
+    }
+
+    // scalar (default)
     const expr = (s.mathjs_expression ?? "").trim();
     let result = "";
     let computed: number | null = null;
@@ -129,20 +231,18 @@ async function precomputeSteps(sol: AiSolution): Promise<PrecomputedStep[]> {
         calculation = `$${expr}$`;
       } else {
         computed = v;
-        const rounded = Math.abs(v - Math.round(v)) < 1e-9 ? Math.round(v) : Number(v.toFixed(6));
-        result = String(rounded);
-        calculation = `$${expr} = ${rounded}$`;
+        result = formatNumber(v);
+        calculation = `$${expr} = ${result}$`;
       }
     }
     return {
-      id: `s${i + 1}`,
-      title: s.title,
-      explanation: s.explanation,
+      ...base,
       calculation,
       result,
       check_expression: expr || null,
       computed,
       eval_error,
+      result_type: "scalar",
     };
   });
 }
@@ -235,26 +335,39 @@ export const runNextStep = createServerFn({ method: "POST" })
     }
 
     const p = precomputed[idx];
-    const hasExpr = !!p.check_expression;
-    const evalOk = hasExpr && p.computed != null;
+    const kind: StepResultType = p.result_type ?? "scalar";
+    const scalarHasExpr = kind === "scalar" && !!p.check_expression;
+    const scalarOk = scalarHasExpr && p.computed != null;
+    const matrixOk = kind === "matrix" && !!p.result_matrix && p.result_matrix.length > 0;
+    const listOk =
+      kind === "list" && !!p.result_list && p.result_list.every((it) => it.computed != null);
+
+    const verified = scalarHasExpr || matrixOk || listOk;
+    const verified_ok =
+      (kind !== "scalar" || !scalarHasExpr || scalarOk) &&
+      (kind !== "matrix" || matrixOk) &&
+      (kind !== "list" || listOk);
+    const skipped = kind === "scalar" && !scalarHasExpr;
 
     const completed: CompletedStep = {
       step_id: p.id,
       title: p.title,
       explanation: p.explanation,
       calculation: p.calculation,
-      result: p.result || (hasExpr ? "Needs review" : ""),
+      result: p.result || (scalarHasExpr ? "Needs review" : ""),
       check_expression: p.check_expression,
       guiding_question: p.guiding_question,
-      verified: hasExpr,
-      verified_ok: !hasExpr || evalOk,
-      skipped: !hasExpr,
+      verified,
+      verified_ok,
+      skipped,
       retried: false,
       computed: p.computed ?? null,
-      verification_warning:
-        hasExpr && !evalOk
-          ? "Please double-check this step — its calculator check could not be evaluated."
-          : undefined,
+      result_type: kind,
+      result_matrix: p.result_matrix,
+      result_list: p.result_list,
+      verification_warning: !verified_ok
+        ? "Please double-check this step — its calculator check could not be evaluated."
+        : undefined,
     };
 
     const newHistory = [...history, completed];
