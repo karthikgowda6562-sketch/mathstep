@@ -96,11 +96,6 @@ function Landing() {
           </span>
         </Link>
         <nav className="flex items-center gap-2 text-sm">
-          <Link to="/formulas">
-            <Button variant="ghost" size="sm">
-              <Calculator className="mr-1 h-4 w-4" /> Formulas
-            </Button>
-          </Link>
           {session ? (
             <>
               <Link to="/history">
