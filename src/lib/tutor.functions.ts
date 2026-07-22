@@ -420,3 +420,44 @@ export const setSessionMode = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { ok: true };
   });
+
+// ---------- Debug: verification stats for the last 5 sessions ----------
+export const verificationDebug = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data, error } = await context.supabase
+      .from("tutor_sessions")
+      .select("id, problem_text, created_at, step_history")
+      .eq("user_id", context.userId)
+      .order("created_at", { ascending: false })
+      .limit(5);
+    if (error) throw new Error(error.message);
+
+    return (data ?? []).map((row) => {
+      const history = (row.step_history as unknown as CompletedStep[]) ?? [];
+      const steps = history.map((h, i) => ({
+        index: i + 1,
+        title: h.title,
+        result: h.result,
+        check_expression: h.check_expression,
+        computed: h.computed ?? null,
+        verified: h.verified,
+        verified_ok: h.verified_ok,
+        skipped: h.skipped ?? false,
+        retried: h.retried ?? false,
+      }));
+      return {
+        sessionId: row.id,
+        problem: row.problem_text,
+        createdAt: row.created_at,
+        totals: {
+          steps: steps.length,
+          retried: steps.filter((s) => s.retried).length,
+          failed: steps.filter((s) => !s.verified_ok && !s.skipped).length,
+          skipped: steps.filter((s) => s.skipped).length,
+          verified: steps.filter((s) => s.verified_ok && !s.skipped).length,
+        },
+        steps,
+      };
+    });
+  });
