@@ -43,13 +43,26 @@ export async function callGeminiJSON<T>(opts: {
 
   const data = await res.json();
   const text: string = data?.choices?.[0]?.message?.content ?? "";
+  const cleaned = text
+    .replace(/^\uFEFF/, "")
+    .replace(/```(?:json)?\s*([\s\S]*?)```/gi, "$1")
+    .trim();
   try {
-    return JSON.parse(text) as T;
+    return JSON.parse(cleaned) as T;
   } catch {
-    // Attempt to extract JSON block
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) return JSON.parse(match[0]) as T;
-    throw new Error("AI returned non-JSON response");
+    const first = cleaned.indexOf("{");
+    const last = cleaned.lastIndexOf("}");
+    if (first !== -1 && last > first) {
+      try {
+        return JSON.parse(cleaned.slice(first, last + 1)) as T;
+      } catch {
+        /* fall through */
+      }
+    }
+    const preview = cleaned.slice(0, 200).replace(/\s+/g, " ");
+    throw new Error(
+      `AI returned non-JSON response${preview ? ` (starts with: "${preview}")` : " (empty response)"}`,
+    );
   }
 }
 
