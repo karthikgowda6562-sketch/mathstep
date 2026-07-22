@@ -20,7 +20,10 @@ export type Database = {
           current_step_index: number
           difficulty: string | null
           domain: string | null
+          failure_reason: string | null
           final_answer: string | null
+          final_verification: Json | null
+          final_verification_attempts: number
           id: string
           mode: string
           plan: Json
@@ -36,7 +39,10 @@ export type Database = {
           current_step_index?: number
           difficulty?: string | null
           domain?: string | null
+          failure_reason?: string | null
           final_answer?: string | null
+          final_verification?: Json | null
+          final_verification_attempts?: number
           id?: string
           mode?: string
           plan?: Json
@@ -52,7 +58,10 @@ export type Database = {
           current_step_index?: number
           difficulty?: string | null
           domain?: string | null
+          failure_reason?: string | null
           final_answer?: string | null
+          final_verification?: Json | null
+          final_verification_attempts?: number
           id?: string
           mode?: string
           plan?: Json
