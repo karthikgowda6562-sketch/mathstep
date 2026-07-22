@@ -148,7 +148,8 @@ export const runNextStep = createServerFn({ method: "POST" })
         ? `This problem is EASY. Keep it super casual and short. 1 sentence explanations. Skip formal methods — if two numbers share an obvious common factor, just say "both divide by 4"; do NOT do a prime factorization. Do not add a separate decimal-conversion step unless the problem asks for a decimal.`
         : difficulty === "hard" || difficulty === "advanced"
           ? `This problem is HARD/ADVANCED. Use rigorous, complete methods and precise language, but still keep sentences short and natural — no textbook filler.`
-          : `This problem is MEDIUM. Balance clarity and rigor. Short natural sentences, show the method but don't over-explain.`;
+          : `This problem is MEDIUM. Balance clarity and rigor. Show the key working, but skip repetitive intermediate lines. For example, for a GCD/prime factor step, go straight to "108 = 2^2 \\times 3^3" with one line of reasoning — do NOT show five nested "divide by 2" lines.`;
+    const executorModel = executorModelForDifficulty(plan.difficulty);
 
     const systemPrompt = `You are the EXECUTOR for a step-by-step math tutor. Accuracy is the #1 priority, but the SECOND priority is talking like a real human tutor, not a textbook.
 
