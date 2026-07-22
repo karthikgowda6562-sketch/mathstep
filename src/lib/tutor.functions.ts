@@ -2,8 +2,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
-// Use the strongest available Gemini for accuracy on math reasoning.
-const PLANNER_MODEL = "google/gemini-2.5-pro";
+// Default to fast Flash for speed; escalate to Pro only when verification fails.
+const PLANNER_MODEL = "google/gemini-2.5-flash";
 const EXECUTOR_MODEL_FAST = "google/gemini-2.5-flash";
 const EXECUTOR_MODEL_PRO = "google/gemini-2.5-pro";
 const EXPLAIN_MODEL = "google/gemini-2.5-flash";
@@ -43,9 +43,9 @@ interface ExecutorResponse {
   guiding_question?: string;
 }
 
-function executorModelForDifficulty(difficulty: string | null | undefined): string {
-  const d = (difficulty ?? "medium").toLowerCase();
-  return d === "hard" || d === "advanced" ? EXECUTOR_MODEL_PRO : EXECUTOR_MODEL_FAST;
+function executorModelForDifficulty(_difficulty: string | null | undefined): string {
+  // Always start with Flash for speed; Pro is reserved for retry-after-failure.
+  return EXECUTOR_MODEL_FAST;
 }
 
 // ---------- Create session (planner) ----------
@@ -69,13 +69,14 @@ Do NOT solve the problem. Do NOT reveal intermediate results or the final answer
 Think carefully about the correct mathematical approach before naming steps. Respect order of operations (PEMDAS/BODMAS), algebraic identities, calculus rules, geometry theorems, and unit consistency.
 Return strict JSON: {"domain": string, "difficulty": "easy"|"medium"|"hard", "steps": [{"id": "s1", "title": "short step name"}]}
 
-SCALE THE NUMBER OF STEPS TO THE DIFFICULTY — do not pad a plan with ceremony steps:
-- "easy" problems (simple arithmetic, reducing a fraction, one-step algebra, unit conversion): use 2-3 steps total. Combine related work (e.g. "divide top and bottom by 4" IS the simplification — no separate GCD step, no separate decimal-conversion step unless the problem asks for a decimal).
-- "medium" problems: 3-5 steps.
-- "hard"/"advanced" problems: 5-8 steps with proper rigor.
+HARD LIMIT — MAXIMUM 3 STEPS TOTAL, no matter the difficulty:
+- Very simple problems (basic arithmetic, a single fraction reduction): 1-2 steps is enough.
+- Everything else: 2-3 steps maximum.
+- COMBINE related sub-steps into ONE step. "Find GCD and simplify" is ONE step, not two. "Find prime factors of both numbers" is ONE step, not two separate steps per number. "Set up the equation and solve for x" can be one step for easy cases.
+- Never produce more than 3 steps. If you're tempted to, merge them.
 
 Titles must be short (max 70 chars) and describe WHAT will be done (e.g. "Divide top and bottom by 4", "Apply the quadratic formula"), not the answer.
-The FINAL step must state or verify the answer.`;
+The FINAL step must produce the answer — do not add a separate "state the final answer" ceremony step.`;
 
     const userContent: Array<
       { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }
@@ -143,33 +144,30 @@ export const runNextStep = createServerFn({ method: "POST" })
     const currentStep = plan.steps[idx];
 
     const difficulty = (plan.difficulty ?? "medium").toLowerCase();
-    const toneGuidance =
-      difficulty === "easy"
-        ? `This problem is EASY. Keep it super casual and short. 1 sentence explanations. Skip formal methods — if two numbers share an obvious common factor, just say "both divide by 4"; do NOT do a prime factorization. Do not add a separate decimal-conversion step unless the problem asks for a decimal.`
-        : difficulty === "hard" || difficulty === "advanced"
-          ? `This problem is HARD/ADVANCED. Use rigorous, complete methods and precise language, but still keep sentences short and natural — no textbook filler.`
-          : `This problem is MEDIUM. Balance clarity and rigor. Show the key working, but skip repetitive intermediate lines. For example, for a GCD/prime factor step, go straight to "108 = 2^2 \\times 3^3" with one line of reasoning — do NOT show five nested "divide by 2" lines.`;
+    const useFormalTerms = difficulty === "hard" || difficulty === "advanced";
+    const toneGuidance = useFormalTerms
+      ? `This problem is HARD/ADVANCED. Use rigorous, complete methods and precise terminology, but keep sentences short and natural — no textbook filler.`
+      : `This problem is ${difficulty.toUpperCase()}. Keep it casual and short. Use everyday words — say "the biggest number that divides both" instead of "greatest common divisor", "divide", "multiply", "share a factor of". Skip repetitive intermediate work (e.g. don't show every single division when breaking down a number — just state the final factorization or answer with one short reason why). Save formal terms for advanced problems only.`;
     const executorModel = executorModelForDifficulty(plan.difficulty);
 
-    const systemPrompt = `You are the EXECUTOR for a step-by-step math tutor. Accuracy is the #1 priority, but the SECOND priority is talking like a real human tutor, not a textbook.
+    const systemPrompt = `You are the EXECUTOR for a step-by-step math tutor. Accuracy is the #1 priority. The SECOND priority is talking like a real human friend, not a textbook.
 
 ${toneGuidance}
 
-How to WRITE (voice & style — this matters):
-- Write the way a patient human tutor would talk to a student out loud. Simple everyday words. Short sentences.
-- NEVER use textbook phrasing like "this represents", "this operation can be expressed as", "we shall now", "this step summarizes", "in accordance with", "it follows that".
-- Just state things directly and naturally, like you're talking, not writing a report.
-- Each step's "explanation" is 1-2 short sentences MAX. Not a paragraph. Not a lecture.
-- Scale depth to difficulty: easy → minimal and casual; advanced → rigorous but still plain-spoken.
-- Don't recap previous steps. Don't announce what you're about to do at length. Just do the step.
+How to WRITE (voice & style — this matters a LOT):
+- Explain like you're talking out loud to a friend. 1-2 short plain sentences per step. NEVER a paragraph.
+- No textbook phrasing, no formal proofs, no unnecessary formulas or terminology unless the problem truly requires it.
+- Use everyday words: "divide", "multiply", "the biggest shared number" instead of "greatest common divisor" for easy/medium problems.
+- Skip repetitive intermediate work. Don't show every single division line when breaking down a number — just state the final factorization or result with one short reason why.
+- Just state things directly, like you're talking. Don't recap. Don't announce what you're about to do.
 
 Rules of reasoning (accuracy — follow every time):
 - Think through the step silently before writing. Prefer symbolic manipulation, then substitute numbers.
-- Respect order of operations (PEMDAS/BODMAS). Parentheses, exponents, multiply/divide, add/subtract.
-- Distribute signs carefully. -(a - b) = -a + b. Watch minus signs on every line.
-- Keep exact values (fractions, radicals, pi, e) whenever possible; only decimal-approximate at the FINAL step, and give at least 4 significant figures.
-- Preserve units. Convert to consistent units before combining. Keep units in the result.
-- Use the CORRECT rules for the domain (quadratic formula, log/exponent laws, trig identities, derivative/integral rules, geometry theorems, etc.). Never invent identities.
+- Respect order of operations (PEMDAS/BODMAS).
+- Distribute signs carefully. -(a - b) = -a + b.
+- Keep exact values (fractions, radicals, pi, e); only decimal-approximate at the final step.
+- Preserve units and keep them in the result.
+- Use the CORRECT domain rules (quadratic formula, log/exponent laws, trig identities, derivative/integral rules, etc.). Never invent identities.
 - Independently redo the arithmetic in your head before writing "result".
 - Use ONLY facts established in the completed steps below. Do not skip ahead.
 
@@ -213,9 +211,9 @@ STRICT RULES for check_expression (a real calculator will evaluate this):
       .map((s, i) => `${i + 1}. ${s.title}`)
       .join("\n")}\n\nCompleted so far:\n${historyText}\n\nCurrent step to solve: ${idx + 1}. ${currentStep.title} (id=${currentStep.id})`;
 
-    async function askExecutor(extraNote?: string) {
+    async function askExecutor(extraNote?: string, modelOverride?: string) {
       return callGeminiJSON<ExecutorResponse>({
-        model: executorModel,
+        model: modelOverride ?? executorModel,
         temperature: 0.1,
         messages: [
           { role: "system", content: systemPrompt },
@@ -241,18 +239,36 @@ STRICT RULES for check_expression (a real calculator will evaluate this):
 
     let check = verifyResult(exec.result, exec.check_expression);
     let retried = false;
+
+    function buildCorrectionNote(prev: ExecutorResponse, c: typeof check) {
+      return `Your previous result was wrong. Recheck your work step by step and try again.
+
+Details from the independent calculator: result="${prev.result}"; check_expression=${JSON.stringify(prev.check_expression)}; computed check value=${c.computed ?? "not evaluable"}; parsed claimed value=${c.claimed ?? "not evaluable"}; reason=${c.reason}. The check_expression must be a literal exact numeric math expression (no variables, no words, no units) whose value equals the numeric value of result. If this step is purely symbolic, return check_expression: null.`;
+    }
+
+    // First retry — same (fast) model.
     if (!check.ok && !check.skipped) {
       retried = true;
-      const note = `Your previous result was wrong. Recheck your work step by step and try again.
-
-Details from the independent calculator: result="${exec.result}"; check_expression=${JSON.stringify(exec.check_expression)}; computed check value=${check.computed ?? "not evaluable"}; parsed claimed value=${check.claimed ?? "not evaluable"}; reason=${check.reason}. The check_expression must be a literal exact numeric math expression (no variables, no words, no units) whose value equals the numeric value of result. If this step is purely symbolic, return check_expression: null.`;
       try {
-        const retryExec = await askExecutor(note);
+        const retryExec = await askExecutor(buildCorrectionNote(exec, check));
         exec = retryExec;
         check = verifyResult(exec.result, exec.check_expression);
       } catch (err) {
-        // Retry failed to parse — keep original result and flag for review
         console.warn("Executor retry failed:", err);
+      }
+    }
+
+    // Second retry — escalate to Pro for accuracy on this one step only.
+    if (!check.ok && !check.skipped) {
+      try {
+        const proExec = await askExecutor(
+          `${buildCorrectionNote(exec, check)}\n\nThis is a final recalculation attempt — take extra care and be exact.`,
+          EXECUTOR_MODEL_PRO,
+        );
+        exec = proExec;
+        check = verifyResult(exec.result, exec.check_expression);
+      } catch (err) {
+        console.warn("Executor Pro recalculation failed:", err);
       }
     }
 
