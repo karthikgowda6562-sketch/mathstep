@@ -2,11 +2,11 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
-// Default to fast Flash for speed; escalate to Pro only when verification fails.
-const PLANNER_MODEL = "google/gemini-2.5-flash";
-const EXECUTOR_MODEL_FAST = "google/gemini-2.5-flash";
-const EXECUTOR_MODEL_PRO = "google/gemini-2.5-pro";
+// One fast model powers the whole solve; mathjs does all arithmetic.
+const SOLVER_MODEL = "google/gemini-2.5-flash";
+const SOLVER_MODEL_PRO = "google/gemini-2.5-pro";
 const EXPLAIN_MODEL = "google/gemini-2.5-flash";
+const EXECUTOR_MODEL_FAST = SOLVER_MODEL; // used by checkGuidedAnswer
 
 // ---------- Types ----------
 export interface PlanStep {
@@ -16,7 +16,20 @@ export interface PlanStep {
 export interface Plan {
   domain: string;
   difficulty: string;
+  summary?: string;
   steps: PlanStep[];
+  precomputed?: PrecomputedStep[];
+}
+export interface PrecomputedStep {
+  id: string;
+  title: string;
+  explanation: string;
+  calculation: string;
+  result: string;
+  check_expression: string | null;
+  guiding_question?: string;
+  computed?: number | null;
+  eval_error?: string;
 }
 export interface CompletedStep {
   step_id: string;
@@ -34,21 +47,107 @@ export interface CompletedStep {
   verification_warning?: string;
 }
 
-interface ExecutorResponse {
-  step_id: string;
-  explanation: string;
-  calculation: string;
-  result: string;
-  check_expression: string | null;
-  guiding_question?: string;
+interface AiSolution {
+  summary: string;
+  steps: Array<{
+    title: string;
+    explanation: string;
+    mathjs_expression: string;
+  }>;
 }
 
-function executorModelForDifficulty(_difficulty: string | null | undefined): string {
-  // Always start with Flash for speed; Pro is reserved for retry-after-failure.
-  return EXECUTOR_MODEL_FAST;
+const SOLVER_SYSTEM_PROMPT = `You are an ultra-fast, highly accurate math assistant designed to solve problems instantly for beginners. Your goal is to break down the solution into the most direct, straightforward path possible.
+
+You MUST adhere strictly to the following rules:
+
+1. MAXIMUM 3 STEPS: Compress the solution into 2 or 3 steps at most. Combine minor arithmetic operations into a single step. Do not drag out the solution.
+
+2. BEGINNER-ORIENTED EXPLANATIONS: Explain the logic in plain, everyday language. Do not use advanced mathematical jargon, complex theorems, or abstract formatting unless explicitly required by the problem. Keep it short and easy to read.
+
+3. 100% ACCURACY VIA DELEGATION: You are prone to arithmetic errors, so you must NEVER calculate final numerical answers yourself. Instead, formulate the exact mathematical expression for each step and provide it in the \`mathjs_expression\` field. The backend engine will calculate the final result.
+
+4. ELEMENTARY METHODS FIRST: Always prefer basic arithmetic and simple algebra over advanced formulas.
+
+Formatting for math inside "explanation": wrap any LaTeX math in $...$ (inline). Never use \\begin{align} or multi-line environments.
+
+The mathjs_expression must be a raw evaluable arithmetic expression using ONLY numbers and operators (+ - * / ^ ( ) sqrt() abs() sin() cos() tan() log() log10() and constants pi, e). No variables, no equals signs, no words, no units, no LaTeX. If a step is purely explanatory with no calculation, use an empty string.
+
+Respond ONLY with a valid JSON object matching this exact structure:
+
+{
+  "summary": "A 1-sentence, simple English overview of how we will solve this.",
+  "steps": [
+    {
+      "title": "Short title of the step (e.g., 'Find the total cost')",
+      "explanation": "A simple, beginner-friendly explanation of the logic for this step.",
+      "mathjs_expression": "The exact arithmetic expression for mathjs to evaluate (e.g., '15 * (24.50 + 5)'). Leave empty string if no calculation is needed."
+    }
+  ]
+}`;
+
+async function solveWithAi(
+  problem: string,
+  imageDataUrl: string | undefined,
+  model: string,
+  correction?: string,
+): Promise<AiSolution> {
+  const { callGeminiJSON } = await import("./ai.server");
+  const userContent: Array<
+    { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }
+  > = [
+    {
+      type: "text",
+      text: correction
+        ? `Problem:\n${problem}\n\nIMPORTANT CORRECTION:\n${correction}`
+        : `Problem:\n${problem}`,
+    },
+  ];
+  if (imageDataUrl) userContent.push({ type: "image_url", image_url: { url: imageDataUrl } });
+  return callGeminiJSON<AiSolution>({
+    model,
+    temperature: 0.1,
+    messages: [
+      { role: "system", content: SOLVER_SYSTEM_PROMPT },
+      { role: "user", content: userContent },
+    ],
+  });
 }
 
-// ---------- Create session (planner) ----------
+async function precomputeSteps(sol: AiSolution): Promise<PrecomputedStep[]> {
+  const { safeEvaluate } = await import("./verify");
+  const trimmed = (sol.steps ?? []).slice(0, 3);
+  return trimmed.map((s, i) => {
+    const expr = (s.mathjs_expression ?? "").trim();
+    let result = "";
+    let computed: number | null = null;
+    let eval_error: string | undefined;
+    let calculation = "";
+    if (expr) {
+      const v = safeEvaluate(expr);
+      if (v == null) {
+        eval_error = "mathjs could not evaluate this expression";
+        calculation = `$${expr}$`;
+      } else {
+        computed = v;
+        const rounded = Math.abs(v - Math.round(v)) < 1e-9 ? Math.round(v) : Number(v.toFixed(6));
+        result = String(rounded);
+        calculation = `$${expr} = ${rounded}$`;
+      }
+    }
+    return {
+      id: `s${i + 1}`,
+      title: s.title,
+      explanation: s.explanation,
+      calculation,
+      result,
+      check_expression: expr || null,
+      computed,
+      eval_error,
+    };
+  });
+}
+
+// ---------- Create session (one AI call, mathjs does the math) ----------
 export const createTutorSession = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) =>
@@ -61,42 +160,37 @@ export const createTutorSession = createServerFn({ method: "POST" })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
-    const { callGeminiJSON } = await import("./ai.server");
+    let solution = await solveWithAi(data.problem, data.imageDataUrl, SOLVER_MODEL);
+    let precomputed = await precomputeSteps(solution);
 
-    const systemPrompt = `You are the PLANNER for a step-by-step math tutor.
-Your ONLY job is to name the steps required to solve the problem correctly.
-Do NOT solve the problem. Do NOT reveal intermediate results or the final answer.
-Think carefully about the correct mathematical approach before naming steps. Respect order of operations (PEMDAS/BODMAS), algebraic identities, calculus rules, geometry theorems, and unit consistency.
-Return strict JSON: {"domain": string, "difficulty": "easy"|"medium"|"hard", "steps": [{"id": "s1", "title": "short step name"}]}
-
-HARD LIMIT — MAXIMUM 3 STEPS TOTAL, no matter the difficulty:
-- Very simple problems (basic arithmetic, a single fraction reduction): 1-2 steps is enough.
-- Everything else: 2-3 steps maximum.
-- COMBINE related sub-steps into ONE step. "Find GCD and simplify" is ONE step, not two. "Find prime factors of both numbers" is ONE step, not two separate steps per number. "Set up the equation and solve for x" can be one step for easy cases.
-- Never produce more than 3 steps. If you're tempted to, merge them.
-
-Titles must be short (max 70 chars) and describe WHAT will be done (e.g. "Divide top and bottom by 4", "Apply the quadratic formula"), not the answer.
-The FINAL step must produce the answer — do not add a separate "state the final answer" ceremony step.`;
-
-    const userContent: Array<
-      { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }
-    > = [{ type: "text", text: `Problem:\n${data.problem}` }];
-    if (data.imageDataUrl) {
-      userContent.push({ type: "image_url", image_url: { url: data.imageDataUrl } });
+    const badStep = precomputed.find((p) => p.eval_error);
+    if (badStep) {
+      try {
+        const retry = await solveWithAi(
+          data.problem,
+          data.imageDataUrl,
+          SOLVER_MODEL_PRO,
+          `Your previous mathjs_expression for step "${badStep.title}" could not be evaluated by mathjs (expression: ${JSON.stringify(badStep.check_expression)}). Every mathjs_expression must be raw numeric arithmetic — no variables, words, units, or LaTeX. If the step has no calculation, use an empty string.`,
+        );
+        const retryPrecomputed = await precomputeSteps(retry);
+        if (retryPrecomputed.every((p) => !p.eval_error)) {
+          solution = retry;
+          precomputed = retryPrecomputed;
+        }
+      } catch (err) {
+        console.warn("Solver Pro retry failed:", err);
+      }
     }
 
-    const plan = await callGeminiJSON<Plan>({
-      model: PLANNER_MODEL,
-      temperature: 0.3,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userContent },
-      ],
-    });
+    if (!precomputed.length) throw new Error("Solver returned no steps");
 
-    if (!plan?.steps?.length) throw new Error("Planner returned no steps");
-    // normalise IDs
-    plan.steps = plan.steps.map((s, i) => ({ id: s.id || `s${i + 1}`, title: s.title }));
+    const plan: Plan = {
+      domain: "math",
+      difficulty: "medium",
+      summary: solution.summary,
+      steps: precomputed.map((p) => ({ id: p.id, title: p.title })),
+      precomputed,
+    };
 
     const { data: row, error } = await context.supabase
       .from("tutor_sessions")
@@ -104,8 +198,8 @@ The FINAL step must produce the answer — do not add a separate "state the fina
         user_id: context.userId,
         problem_text: data.problem,
         problem_image_url: data.imageDataUrl ?? null,
-        domain: plan.domain ?? null,
-        difficulty: plan.difficulty ?? null,
+        domain: plan.domain,
+        difficulty: plan.difficulty,
         plan: plan as unknown as never,
         mode: data.mode,
       })
@@ -116,16 +210,13 @@ The FINAL step must produce the answer — do not add a separate "state the fina
     return { sessionId: row.id as string, plan };
   });
 
-// ---------- Run next step (executor) ----------
+// ---------- Reveal next step (from precomputed cache — instant) ----------
 export const runNextStep = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) =>
     z.object({ sessionId: z.string().uuid() }).parse(input),
   )
   .handler(async ({ data, context }) => {
-    const { callGeminiJSON } = await import("./ai.server");
-    const { verifyResult } = await import("./verify");
-
     const { data: session, error: sErr } = await context.supabase
       .from("tutor_sessions")
       .select("*")
@@ -137,169 +228,39 @@ export const runNextStep = createServerFn({ method: "POST" })
     const plan = session.plan as unknown as Plan;
     const history = (session.step_history as unknown as CompletedStep[]) ?? [];
     const idx = session.current_step_index as number;
+    const precomputed = plan.precomputed ?? [];
 
-    if (idx >= plan.steps.length) {
+    if (idx >= precomputed.length) {
       return { done: true, step: null, session };
     }
-    const currentStep = plan.steps[idx];
 
-    const difficulty = (plan.difficulty ?? "medium").toLowerCase();
-    const useFormalTerms = difficulty === "hard" || difficulty === "advanced";
-    const toneGuidance = useFormalTerms
-      ? `This problem is HARD/ADVANCED. Use rigorous, complete methods and precise terminology, but keep sentences short and natural — no textbook filler.`
-      : `This problem is ${difficulty.toUpperCase()}. Keep it casual and short. Use everyday words — say "the biggest number that divides both" instead of "greatest common divisor", "divide", "multiply", "share a factor of". Skip repetitive intermediate work (e.g. don't show every single division when breaking down a number — just state the final factorization or answer with one short reason why). Save formal terms for advanced problems only.`;
-    const executorModel = executorModelForDifficulty(plan.difficulty);
-
-    const systemPrompt = `You are the EXECUTOR for a step-by-step math tutor. Accuracy is the #1 priority. The SECOND priority is talking like a real human friend, not a textbook.
-
-${toneGuidance}
-
-How to WRITE (voice & style — this matters a LOT):
-- Explain like you're talking out loud to a friend. 1-2 short plain sentences per step. NEVER a paragraph.
-- No textbook phrasing, no formal proofs, no unnecessary formulas or terminology unless the problem truly requires it.
-- Use everyday words: "divide", "multiply", "the biggest shared number" instead of "greatest common divisor" for easy/medium problems.
-- Skip repetitive intermediate work. Don't show every single division line when breaking down a number — just state the final factorization or result with one short reason why.
-- Just state things directly, like you're talking. Don't recap. Don't announce what you're about to do.
-
-Rules of reasoning (accuracy — follow every time):
-- Think through the step silently before writing. Prefer symbolic manipulation, then substitute numbers.
-- Respect order of operations (PEMDAS/BODMAS).
-- Distribute signs carefully. -(a - b) = -a + b.
-- Keep exact values (fractions, radicals, pi, e); only decimal-approximate at the final step.
-- Preserve units and keep them in the result.
-- Use the CORRECT domain rules (quadratic formula, log/exponent laws, trig identities, derivative/integral rules, etc.). Never invent identities.
-- Independently redo the arithmetic in your head before writing "result".
-- Use ONLY facts established in the completed steps below. Do not skip ahead.
-
-FORMATTING — critical for rendering:
-- ALL math notation must be wrapped in $...$ (inline) or $$...$$ (block). This includes fractions, \\frac, \\div, \\times, \\sqrt, exponents, subscripts, and equations.
-- NEVER write bare LaTeX like \\frac{4}{56} or \\div outside of $...$ — it will show as raw text to the student.
-- NEVER use \\begin{align*}, \\begin{align}, \\begin{aligned}, \\begin{gather*}, arrays, cases, or any multi-line LaTeX environment. Use one simple single-line expression instead.
-- Keep each calculation to one or two single-line expressions. Example: "$108 = 2^2 \\times 3^3$ and $144 = 2^4 \\times 3^2$". Do not stack aligned equations.
-- Examples: write "$\\frac{4}{56}$", not "\\frac{4}{56}". Write "$12 \\div 4 = 3$", not "12 \\div 4 = 3".
-- Plain arithmetic without LaTeX commands (like "12 / 4 = 3") is fine unwrapped.
-
-Solve ONLY the current step. Return strict JSON:
-{
-  "step_id": string,
-  "explanation": string,        // 1-2 short natural sentences. Plain-spoken. No textbook voice.
-  "calculation": string,        // the math work. Single-line math only; no align environments. For medium, show key working and skip repetitive arithmetic lines.
-  "result": string,             // the resulting value or expression of THIS step. Prefer exact form; add "≈ <decimal>" only when helpful.
-  "check_expression": string | null,   // see STRICT RULES below
-  "guiding_question": string    // one short casual question a tutor might ask before showing the calculation
-}
-
-STRICT RULES for check_expression (a real calculator will evaluate this):
-- ONLY a raw evaluable mathjs expression using numbers and operators: + - * / ^ ( ) and functions sqrt(), abs(), sin(), cos(), tan(), log(), log10(), plus constants pi, e.
-- NEVER include variable names (no x, y, n), equals signs, units, words, LaTeX, or commentary.
-- If the step's result is an equation like "x = 4", check_expression is just: 4
-- If the step is symbolic with no single numeric value, set check_expression to null.
-- Substitute concrete numbers for any variable that already has a value from prior steps.
-- log(x) is natural log; use log10(x) for base-10; trig is in radians.
-- Before returning, mentally evaluate check_expression and confirm it equals the numeric value of "result".`;
-
-    const historyText = history.length
-      ? history
-          .map(
-            (h, i) =>
-              `Step ${i + 1} (${h.title}):\nExplanation: ${h.explanation}\nCalculation: ${h.calculation}\nResult: ${h.result}${h.computed != null ? ` (verified numeric ≈ ${h.computed})` : ""}`,
-          )
-          .join("\n\n")
-      : "(no previous steps yet)";
-
-    const basePrompt = `Problem:\n${session.problem_text}\n\nFull plan:\n${plan.steps
-      .map((s, i) => `${i + 1}. ${s.title}`)
-      .join("\n")}\n\nCompleted so far:\n${historyText}\n\nCurrent step to solve: ${idx + 1}. ${currentStep.title} (id=${currentStep.id})`;
-
-    async function askExecutor(extraNote?: string, modelOverride?: string) {
-      return callGeminiJSON<ExecutorResponse>({
-        model: modelOverride ?? executorModel,
-        temperature: 0.1,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: extraNote ? `${basePrompt}\n\nIMPORTANT CORRECTION:\n${extraNote}` : basePrompt },
-        ],
-      });
-    }
-
-    let exec: ExecutorResponse;
-    try {
-      exec = await askExecutor();
-    } catch (err) {
-      console.warn("Executor returned malformed JSON:", err);
-      exec = {
-        step_id: currentStep.id,
-        explanation: "I had trouble formatting this step, so please double-check it.",
-        calculation: "The AI response for this step could not be read safely.",
-        result: "Needs review",
-        check_expression: null,
-        guiding_question: "What should we check before moving on?",
-      };
-    }
-
-    let check = verifyResult(exec.result, exec.check_expression);
-    let retried = false;
-
-    function buildCorrectionNote(prev: ExecutorResponse, c: typeof check) {
-      return `Your previous result was wrong. Recheck your work step by step and try again.
-
-Details from the independent calculator: result="${prev.result}"; check_expression=${JSON.stringify(prev.check_expression)}; computed check value=${c.computed ?? "not evaluable"}; parsed claimed value=${c.claimed ?? "not evaluable"}; reason=${c.reason}. The check_expression must be a literal exact numeric math expression (no variables, no words, no units) whose value equals the numeric value of result. If this step is purely symbolic, return check_expression: null.`;
-    }
-
-    // First retry — same (fast) model.
-    if (!check.ok && !check.skipped) {
-      retried = true;
-      try {
-        const retryExec = await askExecutor(buildCorrectionNote(exec, check));
-        exec = retryExec;
-        check = verifyResult(exec.result, exec.check_expression);
-      } catch (err) {
-        console.warn("Executor retry failed:", err);
-      }
-    }
-
-    // Second retry — escalate to Pro for accuracy on this one step only.
-    if (!check.ok && !check.skipped) {
-      try {
-        const proExec = await askExecutor(
-          `${buildCorrectionNote(exec, check)}\n\nThis is a final recalculation attempt — take extra care and be exact.`,
-          EXECUTOR_MODEL_PRO,
-        );
-        exec = proExec;
-        check = verifyResult(exec.result, exec.check_expression);
-      } catch (err) {
-        console.warn("Executor Pro recalculation failed:", err);
-      }
-    }
-
-    const verificationWarning =
-      check.ok
-        ? undefined
-        : check.computed == null
-          ? "Please double-check this step — its calculator check could not be evaluated."
-          : "Please double-check this step — its result did not match the calculator check.";
+    const p = precomputed[idx];
+    const hasExpr = !!p.check_expression;
+    const evalOk = hasExpr && p.computed != null;
 
     const completed: CompletedStep = {
-      step_id: currentStep.id,
-      title: currentStep.title,
-      explanation: exec.explanation,
-      calculation: exec.calculation,
-      result: exec.result,
-      check_expression: exec.check_expression ?? null,
-      guiding_question: exec.guiding_question,
-      verified: check.verified,
-      verified_ok: check.ok,
-      skipped: check.skipped,
-      retried,
-      computed: check.computed,
-      verification_warning: verificationWarning,
+      step_id: p.id,
+      title: p.title,
+      explanation: p.explanation,
+      calculation: p.calculation,
+      result: p.result || (hasExpr ? "Needs review" : ""),
+      check_expression: p.check_expression,
+      guiding_question: p.guiding_question,
+      verified: hasExpr,
+      verified_ok: !hasExpr || evalOk,
+      skipped: !hasExpr,
+      retried: false,
+      computed: p.computed ?? null,
+      verification_warning:
+        hasExpr && !evalOk
+          ? "Please double-check this step — its calculator check could not be evaluated."
+          : undefined,
     };
 
     const newHistory = [...history, completed];
     const newIdx = idx + 1;
-    const isDone = newIdx >= plan.steps.length;
+    const isDone = newIdx >= precomputed.length;
 
-    // --- Universal end-to-end verification on the final step ---
     if (isDone) {
       const { universalVerify } = await import("./verify");
       const finalCheck = universalVerify({
@@ -308,88 +269,13 @@ Details from the independent calculator: result="${prev.result}"; check_expressi
         finalAnswer: completed.result,
       });
 
-      if (!finalCheck.ok) {
-        const priorAttempts = (session as unknown as { final_verification_attempts?: number }).final_verification_attempts ?? 0;
-        const nextAttempts = priorAttempts + 1;
-
-        // Detailed failure log across full chain, for pattern review.
-        console.warn("[universal-verify FAILED]", JSON.stringify({
-          sessionId: data.sessionId,
-          attempt: nextAttempts,
-          domain: session.domain,
-          problem: session.problem_text,
-          final_answer: completed.result,
-          reason: finalCheck.reason,
-          kind: finalCheck.kind,
-          step_chain: newHistory.map((h) => ({ title: h.title, result: h.result, check_expression: h.check_expression, verified_ok: h.verified_ok })),
-        }));
-
-        if (nextAttempts >= 2) {
-          // Give up — don't show a wrong answer.
-          const { error: fErr } = await context.supabase
-            .from("tutor_sessions")
-            .update({
-              step_history: newHistory as unknown as never,
-              current_step_index: newIdx,
-              status: "failed",
-              final_answer: null,
-              failure_reason:
-                "I'm having trouble solving this one accurately — please try rephrasing the problem.",
-              final_verification_attempts: nextAttempts,
-              final_verification: finalCheck as unknown as never,
-            })
-            .eq("id", data.sessionId);
-          if (fErr) throw new Error(fErr.message);
-          return { done: true, step: completed, currentIndex: newIdx, failed: true };
-        }
-
-        // Retry: discard chain and regenerate a fresh plan.
-        const { callGeminiJSON } = await import("./ai.server");
-        const retryPlannerPrompt = `You are the PLANNER for a step-by-step math tutor.
-Your ONLY job is to name the steps required to solve the problem correctly.
-Return strict JSON: {"domain": string, "difficulty": "easy"|"medium"|"hard", "steps": [{"id":"s1","title":"..."}]}.
-HARD LIMIT: at most 3 steps. Combine sub-steps. The FINAL step produces the answer.
-
-NOTE: A previous attempt produced final answer "${completed.result}", which failed an independent verification (${finalCheck.reason}). Plan a DIFFERENT approach that avoids the earlier mistake.`;
-
-        const newPlan = await callGeminiJSON<Plan>({
-          model: PLANNER_MODEL,
-          temperature: 0.4,
-          messages: [
-            { role: "system", content: retryPlannerPrompt },
-            { role: "user", content: `Problem:\n${session.problem_text}` },
-          ],
-        });
-        if (!newPlan?.steps?.length) throw new Error("Planner returned no steps on retry");
-        newPlan.steps = newPlan.steps.map((s, i) => ({ id: s.id || `s${i + 1}`, title: s.title }));
-
-        const { error: rErr } = await context.supabase
-          .from("tutor_sessions")
-          .update({
-            plan: newPlan as unknown as never,
-            step_history: [] as unknown as never,
-            current_step_index: 0,
-            status: "in_progress",
-            final_answer: null,
-            domain: newPlan.domain ?? session.domain,
-            difficulty: newPlan.difficulty ?? session.difficulty,
-            final_verification_attempts: nextAttempts,
-            final_verification: finalCheck as unknown as never,
-          })
-          .eq("id", data.sessionId);
-        if (rErr) throw new Error(rErr.message);
-
-        return { done: false, step: null, currentIndex: 0, restarted: true };
-      }
-
-      // Universal check passed (or was skipped with ok=true) — persist success.
       const { error: uErr } = await context.supabase
         .from("tutor_sessions")
         .update({
           step_history: newHistory as unknown as never,
           current_step_index: newIdx,
           status: "complete",
-          final_answer: completed.result,
+          final_answer: completed.result || null,
           final_verification: finalCheck as unknown as never,
         })
         .eq("id", data.sessionId);
@@ -397,7 +283,6 @@ NOTE: A previous attempt produced final answer "${completed.result}", which fail
       return { done: true, step: completed, currentIndex: newIdx };
     }
 
-    // Intermediate step — persist and continue.
     const { error: uErr } = await context.supabase
       .from("tutor_sessions")
       .update({
