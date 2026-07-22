@@ -193,6 +193,10 @@ function Landing() {
                 Upload image
               </Button>
 
+              <FormulaPicker onInsert={insertFormula} />
+
+
+
               <div className="flex items-center gap-2">
                 <Switch
                   id="guided"
