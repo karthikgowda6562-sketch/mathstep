@@ -482,3 +482,49 @@ function StepItem(props: {
     </li>
   );
 }
+
+function StepResult({ step, large }: { step: CompletedStep; large?: boolean }) {
+  if (step.result_type === "matrix" && step.result_matrix) {
+    return <MatrixGrid data={step.result_matrix} large={large} />;
+  }
+  if (step.result_type === "list" && step.result_list) {
+    return (
+      <ul className="space-y-1">
+        {step.result_list.map((it, i) => (
+          <li key={i} className="flex flex-wrap items-baseline gap-2">
+            <span className="text-muted-foreground">{it.label}:</span>
+            <span className="font-medium">
+              <MathText text={it.value} />
+            </span>
+          </li>
+        ))}
+      </ul>
+    );
+  }
+  if (!step.result) return <span className="text-muted-foreground">—</span>;
+  return <MathText text={step.result} />;
+}
+
+function MatrixGrid({ data, large }: { data: number[][]; large?: boolean }) {
+  const rows = data.length;
+  const cols = data[0]?.length ?? 0;
+  const cellSize = large ? "min-w-14 px-3 py-2 text-2xl" : "min-w-10 px-2 py-1 text-base";
+  return (
+    <div className="inline-flex items-stretch gap-1">
+      <div className="w-1.5 rounded-l border-y-2 border-l-2 border-foreground" aria-hidden />
+      <div
+        className="grid gap-1 py-1"
+        style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, auto))`, gridTemplateRows: `repeat(${rows}, auto)` }}
+      >
+        {data.flatMap((row, r) =>
+          row.map((val, c) => (
+            <span key={`${r}-${c}`} className={`text-center tabular-nums ${cellSize}`}>
+              {Math.abs(val - Math.round(val)) < 1e-9 ? Math.round(val) : Number(val.toFixed(4))}
+            </span>
+          )),
+        )}
+      </div>
+      <div className="w-1.5 rounded-r border-y-2 border-r-2 border-foreground" aria-hidden />
+    </div>
+  );
+}
