@@ -58,6 +58,7 @@ interface SessionRow {
   mode: "guided" | "direct";
   status: string;
   final_answer: string | null;
+  failure_reason?: string | null;
 }
 
 function SolvePage() {
