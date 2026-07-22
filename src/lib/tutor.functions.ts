@@ -335,26 +335,39 @@ export const runNextStep = createServerFn({ method: "POST" })
     }
 
     const p = precomputed[idx];
-    const hasExpr = !!p.check_expression;
-    const evalOk = hasExpr && p.computed != null;
+    const kind: StepResultType = p.result_type ?? "scalar";
+    const scalarHasExpr = kind === "scalar" && !!p.check_expression;
+    const scalarOk = scalarHasExpr && p.computed != null;
+    const matrixOk = kind === "matrix" && !!p.result_matrix && p.result_matrix.length > 0;
+    const listOk =
+      kind === "list" && !!p.result_list && p.result_list.every((it) => it.computed != null);
+
+    const verified = scalarHasExpr || matrixOk || listOk;
+    const verified_ok =
+      (kind !== "scalar" || !scalarHasExpr || scalarOk) &&
+      (kind !== "matrix" || matrixOk) &&
+      (kind !== "list" || listOk);
+    const skipped = kind === "scalar" && !scalarHasExpr;
 
     const completed: CompletedStep = {
       step_id: p.id,
       title: p.title,
       explanation: p.explanation,
       calculation: p.calculation,
-      result: p.result || (hasExpr ? "Needs review" : ""),
+      result: p.result || (scalarHasExpr ? "Needs review" : ""),
       check_expression: p.check_expression,
       guiding_question: p.guiding_question,
-      verified: hasExpr,
-      verified_ok: !hasExpr || evalOk,
-      skipped: !hasExpr,
+      verified,
+      verified_ok,
+      skipped,
       retried: false,
       computed: p.computed ?? null,
-      verification_warning:
-        hasExpr && !evalOk
-          ? "Please double-check this step — its calculator check could not be evaluated."
-          : undefined,
+      result_type: kind,
+      result_matrix: p.result_matrix,
+      result_list: p.result_list,
+      verification_warning: !verified_ok
+        ? "Please double-check this step — its calculator check could not be evaluated."
+        : undefined,
     };
 
     const newHistory = [...history, completed];
