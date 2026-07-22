@@ -299,18 +299,116 @@ Details from the independent calculator: result="${prev.result}"; check_expressi
     const newIdx = idx + 1;
     const isDone = newIdx >= plan.steps.length;
 
+    // --- Universal end-to-end verification on the final step ---
+    if (isDone) {
+      const { universalVerify } = await import("./verify");
+      const finalCheck = universalVerify({
+        problem: session.problem_text,
+        domain: session.domain,
+        finalAnswer: completed.result,
+      });
+
+      if (!finalCheck.ok) {
+        const priorAttempts = (session as unknown as { final_verification_attempts?: number }).final_verification_attempts ?? 0;
+        const nextAttempts = priorAttempts + 1;
+
+        // Detailed failure log across full chain, for pattern review.
+        console.warn("[universal-verify FAILED]", JSON.stringify({
+          sessionId: data.sessionId,
+          attempt: nextAttempts,
+          domain: session.domain,
+          problem: session.problem_text,
+          final_answer: completed.result,
+          reason: finalCheck.reason,
+          kind: finalCheck.kind,
+          step_chain: newHistory.map((h) => ({ title: h.title, result: h.result, check_expression: h.check_expression, verified_ok: h.verified_ok })),
+        }));
+
+        if (nextAttempts >= 2) {
+          // Give up — don't show a wrong answer.
+          const { error: fErr } = await context.supabase
+            .from("tutor_sessions")
+            .update({
+              step_history: newHistory as unknown as never,
+              current_step_index: newIdx,
+              status: "failed",
+              final_answer: null,
+              failure_reason:
+                "I'm having trouble solving this one accurately — please try rephrasing the problem.",
+              final_verification_attempts: nextAttempts,
+              final_verification: finalCheck as unknown as never,
+            })
+            .eq("id", data.sessionId);
+          if (fErr) throw new Error(fErr.message);
+          return { done: true, step: completed, currentIndex: newIdx, failed: true };
+        }
+
+        // Retry: discard chain and regenerate a fresh plan.
+        const { callGeminiJSON } = await import("./ai.server");
+        const retryPlannerPrompt = `You are the PLANNER for a step-by-step math tutor.
+Your ONLY job is to name the steps required to solve the problem correctly.
+Return strict JSON: {"domain": string, "difficulty": "easy"|"medium"|"hard", "steps": [{"id":"s1","title":"..."}]}.
+HARD LIMIT: at most 3 steps. Combine sub-steps. The FINAL step produces the answer.
+
+NOTE: A previous attempt produced final answer "${completed.result}", which failed an independent verification (${finalCheck.reason}). Plan a DIFFERENT approach that avoids the earlier mistake.`;
+
+        const newPlan = await callGeminiJSON<Plan>({
+          model: PLANNER_MODEL,
+          temperature: 0.4,
+          messages: [
+            { role: "system", content: retryPlannerPrompt },
+            { role: "user", content: `Problem:\n${session.problem_text}` },
+          ],
+        });
+        if (!newPlan?.steps?.length) throw new Error("Planner returned no steps on retry");
+        newPlan.steps = newPlan.steps.map((s, i) => ({ id: s.id || `s${i + 1}`, title: s.title }));
+
+        const { error: rErr } = await context.supabase
+          .from("tutor_sessions")
+          .update({
+            plan: newPlan as unknown as never,
+            step_history: [] as unknown as never,
+            current_step_index: 0,
+            status: "in_progress",
+            final_answer: null,
+            domain: newPlan.domain ?? session.domain,
+            difficulty: newPlan.difficulty ?? session.difficulty,
+            final_verification_attempts: nextAttempts,
+            final_verification: finalCheck as unknown as never,
+          })
+          .eq("id", data.sessionId);
+        if (rErr) throw new Error(rErr.message);
+
+        return { done: false, step: null, currentIndex: 0, restarted: true };
+      }
+
+      // Universal check passed (or was skipped with ok=true) — persist success.
+      const { error: uErr } = await context.supabase
+        .from("tutor_sessions")
+        .update({
+          step_history: newHistory as unknown as never,
+          current_step_index: newIdx,
+          status: "complete",
+          final_answer: completed.result,
+          final_verification: finalCheck as unknown as never,
+        })
+        .eq("id", data.sessionId);
+      if (uErr) throw new Error(uErr.message);
+      return { done: true, step: completed, currentIndex: newIdx };
+    }
+
+    // Intermediate step — persist and continue.
     const { error: uErr } = await context.supabase
       .from("tutor_sessions")
       .update({
         step_history: newHistory as unknown as never,
         current_step_index: newIdx,
-        status: isDone ? "complete" : "in_progress",
-        final_answer: isDone ? completed.result : null,
+        status: "in_progress",
       })
       .eq("id", data.sessionId);
     if (uErr) throw new Error(uErr.message);
 
-    return { done: isDone, step: completed, currentIndex: newIdx };
+    return { done: false, step: completed, currentIndex: newIdx };
   });
 
 // ---------- Explain step ----------
