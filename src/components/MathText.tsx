@@ -48,6 +48,13 @@ function normalizeUnsupportedEnvironments(text: string): string {
   );
 }
 
+function normalizeMalformedLatex(text: string): string {
+  return text
+    .replace(/\\(frac|dfrac|tfrac)\s*(\d)(\d+)\b/g, (_m, cmd: string, numerator: string, denominator: string) => `\\${cmd}{${numerator}}{${denominator}}`)
+    .replace(/\\div\b/g, String.raw`\div`)
+    .replace(/\\times\b/g, String.raw`\times`);
+}
+
 function removeAdjacentDuplicateMath(text: string): string {
   let cleaned = text;
   for (let i = 0; i < 4; i += 1) {
@@ -68,7 +75,7 @@ function normalizeDelimiters(text: string): string {
 }
 
 function renderKatex(math: string, key: string, displayMode = false) {
-  const normalizedMath = stripAlignMarkers(math).trim();
+  const normalizedMath = normalizeMalformedLatex(stripAlignMarkers(math)).trim();
   if (!normalizedMath) return null;
 
   const html = katex.renderToString(normalizedMath, {
