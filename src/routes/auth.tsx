@@ -9,6 +9,22 @@ import { toast } from "sonner";
 import { Sparkles } from "lucide-react";
 
 export const Route = createFileRoute("/auth")({
+  head: () => ({
+    meta: [
+      { title: "Sign in · MathStep" },
+      {
+        name: "description",
+        content: "Sign in to MathStep to save math tutoring sessions and revisit solved problems.",
+      },
+      { property: "og:title", content: "Sign in · MathStep" },
+      {
+        property: "og:description",
+        content: "Access your saved MathStep tutoring sessions and problem history.",
+      },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
+    ],
+  }),
   component: AuthPage,
 });
 

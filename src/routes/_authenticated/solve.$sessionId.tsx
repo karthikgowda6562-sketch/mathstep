@@ -30,6 +30,22 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 
 export const Route = createFileRoute("/_authenticated/solve/$sessionId")({
+  head: () => ({
+    meta: [
+      { title: "Solving problem · MathStep" },
+      {
+        name: "description",
+        content: "Watch MathStep solve a math problem in verified, easy-to-follow steps.",
+      },
+      { property: "og:title", content: "Solving problem · MathStep" },
+      {
+        property: "og:description",
+        content: "Verified step-by-step math solving with plain-spoken explanations.",
+      },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
+    ],
+  }),
   component: SolvePage,
 });
 
@@ -75,13 +91,23 @@ function SolvePage() {
     try {
       const res = await nextStep({ data: { sessionId } });
       if (res.step) setJustRevealedId(res.step.step_id);
-      await refresh();
+      setSession((prev) => {
+        if (!prev || !res.step) return prev;
+        const nextIndex = res.currentIndex ?? prev.current_step_index + 1;
+        return {
+          ...prev,
+          step_history: [...prev.step_history, res.step],
+          current_step_index: nextIndex,
+          status: res.done ? "complete" : "in_progress",
+          final_answer: res.done ? res.step.result : prev.final_answer,
+        };
+      });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed");
     } finally {
       setLoadingStep(false);
     }
-  }, [nextStep, refresh, sessionId]);
+  }, [nextStep, sessionId]);
 
   // Auto-reveal steps one after another until the problem is solved
   useEffect(() => {

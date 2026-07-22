@@ -6,6 +6,22 @@ import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/history")({
+  head: () => ({
+    meta: [
+      { title: "Problem history · MathStep" },
+      {
+        name: "description",
+        content: "Review your saved MathStep tutoring sessions and continue unfinished math problems.",
+      },
+      { property: "og:title", content: "Problem history · MathStep" },
+      {
+        property: "og:description",
+        content: "Saved MathStep sessions with step progress and completed solutions.",
+      },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
+    ],
+  }),
   component: HistoryPage,
 });
 

@@ -4,7 +4,8 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 // Use the strongest available Gemini for accuracy on math reasoning.
 const PLANNER_MODEL = "google/gemini-2.5-pro";
-const EXECUTOR_MODEL = "google/gemini-2.5-pro";
+const EXECUTOR_MODEL_FAST = "google/gemini-2.5-flash";
+const EXECUTOR_MODEL_PRO = "google/gemini-2.5-pro";
 const EXPLAIN_MODEL = "google/gemini-2.5-flash";
 
 // ---------- Types ----------
@@ -40,6 +41,11 @@ interface ExecutorResponse {
   result: string;
   check_expression: string | null;
   guiding_question?: string;
+}
+
+function executorModelForDifficulty(difficulty: string | null | undefined): string {
+  const d = (difficulty ?? "medium").toLowerCase();
+  return d === "hard" || d === "advanced" ? EXECUTOR_MODEL_PRO : EXECUTOR_MODEL_FAST;
 }
 
 // ---------- Create session (planner) ----------
@@ -142,7 +148,8 @@ export const runNextStep = createServerFn({ method: "POST" })
         ? `This problem is EASY. Keep it super casual and short. 1 sentence explanations. Skip formal methods — if two numbers share an obvious common factor, just say "both divide by 4"; do NOT do a prime factorization. Do not add a separate decimal-conversion step unless the problem asks for a decimal.`
         : difficulty === "hard" || difficulty === "advanced"
           ? `This problem is HARD/ADVANCED. Use rigorous, complete methods and precise language, but still keep sentences short and natural — no textbook filler.`
-          : `This problem is MEDIUM. Balance clarity and rigor. Short natural sentences, show the method but don't over-explain.`;
+          : `This problem is MEDIUM. Balance clarity and rigor. Show the key working, but skip repetitive intermediate lines. For example, for a GCD/prime factor step, go straight to "108 = 2^2 \\times 3^3" with one line of reasoning — do NOT show five nested "divide by 2" lines.`;
+    const executorModel = executorModelForDifficulty(plan.difficulty);
 
     const systemPrompt = `You are the EXECUTOR for a step-by-step math tutor. Accuracy is the #1 priority, but the SECOND priority is talking like a real human tutor, not a textbook.
 
@@ -169,6 +176,8 @@ Rules of reasoning (accuracy — follow every time):
 FORMATTING — critical for rendering:
 - ALL math notation must be wrapped in $...$ (inline) or $$...$$ (block). This includes fractions, \\frac, \\div, \\times, \\sqrt, exponents, subscripts, and equations.
 - NEVER write bare LaTeX like \\frac{4}{56} or \\div outside of $...$ — it will show as raw text to the student.
+- NEVER use \\begin{align*}, \\begin{align}, \\begin{aligned}, \\begin{gather*}, arrays, cases, or any multi-line LaTeX environment. Use one simple single-line expression instead.
+- Keep each calculation to one or two single-line expressions. Example: "$108 = 2^2 \\times 3^3$ and $144 = 2^4 \\times 3^2$". Do not stack aligned equations.
 - Examples: write "$\\frac{4}{56}$", not "\\frac{4}{56}". Write "$12 \\div 4 = 3$", not "12 \\div 4 = 3".
 - Plain arithmetic without LaTeX commands (like "12 / 4 = 3") is fine unwrapped.
 
@@ -176,7 +185,7 @@ Solve ONLY the current step. Return strict JSON:
 {
   "step_id": string,
   "explanation": string,        // 1-2 short natural sentences. Plain-spoken. No textbook voice.
-  "calculation": string,        // the math work. Wrap every LaTeX symbol in $...$. Show every arithmetic simplification.
+  "calculation": string,        // the math work. Single-line math only; no align environments. For medium, show key working and skip repetitive arithmetic lines.
   "result": string,             // the resulting value or expression of THIS step. Prefer exact form; add "≈ <decimal>" only when helpful.
   "check_expression": string | null,   // see STRICT RULES below
   "guiding_question": string    // one short casual question a tutor might ask before showing the calculation
@@ -206,7 +215,7 @@ STRICT RULES for check_expression (a real calculator will evaluate this):
 
     async function askExecutor(extraNote?: string) {
       return callGeminiJSON<ExecutorResponse>({
-        model: EXECUTOR_MODEL,
+        model: executorModel,
         temperature: 0.1,
         messages: [
           { role: "system", content: systemPrompt },
@@ -345,7 +354,7 @@ export const checkGuidedAnswer = createServerFn({ method: "POST" })
       verdict: "correct" | "partial" | "incorrect";
       feedback: string;
     }>({
-      model: EXECUTOR_MODEL,
+      model: EXECUTOR_MODEL_FAST,
       temperature: 0.2,
       messages: [
         {
