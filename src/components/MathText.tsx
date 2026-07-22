@@ -50,7 +50,10 @@ function normalizeUnsupportedEnvironments(text: string): string {
 
 function normalizeMalformedLatex(text: string): string {
   return text
-    .replace(/\\(frac|dfrac|tfrac)\s*(\d)(\d+)\b/g, (_m, cmd: string, numerator: string, denominator: string) => `\\${cmd}{${numerator}}{${denominator}}`)
+    .replace(/\\(frac|dfrac|tfrac)\s*(\d{2,})\b/g, (_m, cmd: string, digits: string) => {
+      const splitAt = digits.length % 2 === 0 ? digits.length / 2 : 1;
+      return `\\${cmd}{${digits.slice(0, splitAt)}}{${digits.slice(splitAt)}}`;
+    })
     .replace(/\\div\b/g, String.raw`\div`)
     .replace(/\\times\b/g, String.raw`\times`);
 }
@@ -69,7 +72,7 @@ function removeAdjacentDuplicateMath(text: string): string {
 
 function normalizeDelimiters(text: string): string {
   // Convert \(...\) → $...$ and \[...\] → $$...$$
-  return removeAdjacentDuplicateMath(normalizeUnsupportedEnvironments(text))
+  return removeAdjacentDuplicateMath(normalizeUnsupportedEnvironments(normalizeMalformedLatex(text)))
     .replace(/\\\[([\s\S]+?)\\\]/g, (_, m) => `$$${m}$$`)
     .replace(/\\\(([\s\S]+?)\\\)/g, (_, m) => `$${m}$`);
 }
