@@ -20,6 +20,12 @@ export interface Plan {
   steps: PlanStep[];
   precomputed?: PrecomputedStep[];
 }
+export type StepResultType = "scalar" | "matrix" | "list";
+export interface ResultListItem {
+  label: string;
+  value: string;
+  computed?: number | null;
+}
 export interface PrecomputedStep {
   id: string;
   title: string;
@@ -30,6 +36,9 @@ export interface PrecomputedStep {
   guiding_question?: string;
   computed?: number | null;
   eval_error?: string;
+  result_type: StepResultType;
+  result_matrix?: number[][];
+  result_list?: ResultListItem[];
 }
 export interface CompletedStep {
   step_id: string;
@@ -45,6 +54,9 @@ export interface CompletedStep {
   retried?: boolean;
   computed?: number | null;
   verification_warning?: string;
+  result_type?: StepResultType;
+  result_matrix?: number[][];
+  result_list?: ResultListItem[];
 }
 
 interface AiSolution {
