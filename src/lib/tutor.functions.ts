@@ -23,10 +23,12 @@ export interface CompletedStep {
   explanation: string;
   calculation: string;
   result: string;
-  check_expression: string;
+  check_expression: string | null;
   guiding_question?: string;
   verified: boolean;
   verified_ok: boolean;
+  skipped?: boolean;
+  retried?: boolean;
   computed?: number | null;
   verification_warning?: string;
 }
@@ -36,7 +38,7 @@ interface ExecutorResponse {
   explanation: string;
   calculation: string;
   result: string;
-  check_expression: string;
+  check_expression: string | null;
   guiding_question?: string;
 }
 
@@ -149,11 +151,18 @@ Solve ONLY the current step. Return strict JSON:
   "explanation": string,        // 1-3 short sentences in plain English, WHY this step is done
   "calculation": string,        // the math work for this step. Wrap formulas in $...$ (LaTeX). Show every arithmetic simplification explicitly.
   "result": string,             // the resulting value or expression of THIS step only. Prefer exact form; add "≈ <decimal>" when helpful.
-  "check_expression": string,   // a literal, exact, plain mathjs-evaluable expression whose value equals the numeric value of result (e.g. "(12+8)/4"). No LaTeX, no words, no units. For solved variables, use the numeric/exact value only. If the result is purely symbolic with unbound variables, return "".
+  "check_expression": string | null,   // see STRICT RULES below
   "guiding_question": string    // one short question a tutor could ask before showing the calculation
 }
 
-mathjs syntax for check_expression: use *, /, +, -, ^, sqrt(), abs(), sin/cos/tan (radians), log(x) is natural log, log10(x), pi, e. Substitute concrete numbers for any variable that already has a value from prior steps. check_expression must be a literal, exact evaluable math expression because it will be checked by a real calculator.`;
+STRICT RULES for check_expression (a real calculator will evaluate this):
+- It must be ONLY a raw evaluable mathjs expression using numbers and operators: + - * / ^ ( ) and functions sqrt(), abs(), sin(), cos(), tan(), log(), log10(), plus constants pi, e.
+- NEVER include variable names (no x, y, n, etc.), equals signs, units, words, LaTeX, or commentary.
+- If the step's result is an equation like "x = 4", check_expression is just the numeric value: 4
+- If the step's result is symbolic (e.g. simplifying an expression, with unbound variables) and there is no single numeric value to check, set check_expression to null (JSON null) and verification will be skipped for this step.
+- Substitute concrete numbers for any variable that already has a value from prior steps.
+- log(x) is natural log; use log10(x) for base-10; trig is in radians.
+- Before returning, mentally evaluate check_expression and confirm its numeric value equals the numeric value of "result".`;
 
     const historyText = history.length
       ? history
@@ -181,19 +190,22 @@ mathjs syntax for check_expression: use *, /, +, -, ^, sqrt(), abs(), sin/cos/ta
 
     let exec = await askExecutor();
     let check = verifyResult(exec.result, exec.check_expression);
-    if (!check.ok) {
+    let retried = false;
+    if (!check.ok && !check.skipped) {
+      retried = true;
       const note = `Your previous result was wrong. Recheck your work step by step and try again.
 
-Details from the independent calculator: result="${exec.result}"; check_expression="${exec.check_expression}"; computed check value=${check.computed ?? "not evaluable"}; parsed claimed value=${check.claimed ?? "not evaluable"}. The check_expression must be a literal exact math expression that evaluates to the same numeric value as result.`;
+Details from the independent calculator: result="${exec.result}"; check_expression=${JSON.stringify(exec.check_expression)}; computed check value=${check.computed ?? "not evaluable"}; parsed claimed value=${check.claimed ?? "not evaluable"}; reason=${check.reason}. The check_expression must be a literal exact numeric math expression (no variables, no words, no units) whose value equals the numeric value of result. If this step is purely symbolic, return check_expression: null.`;
       exec = await askExecutor(note);
       check = verifyResult(exec.result, exec.check_expression);
     }
 
-    const verificationWarning = check.ok
-      ? undefined
-      : check.computed == null
-        ? "Please double-check this step — its calculator check could not be evaluated."
-        : "Please double-check this step — its result did not match the calculator check.";
+    const verificationWarning =
+      check.ok
+        ? undefined
+        : check.computed == null
+          ? "Please double-check this step — its calculator check could not be evaluated."
+          : "Please double-check this step — its result did not match the calculator check.";
 
     const completed: CompletedStep = {
       step_id: currentStep.id,
@@ -201,10 +213,12 @@ Details from the independent calculator: result="${exec.result}"; check_expressi
       explanation: exec.explanation,
       calculation: exec.calculation,
       result: exec.result,
-      check_expression: exec.check_expression,
+      check_expression: exec.check_expression ?? null,
       guiding_question: exec.guiding_question,
       verified: check.verified,
       verified_ok: check.ok,
+      skipped: check.skipped,
+      retried,
       computed: check.computed,
       verification_warning: verificationWarning,
     };
@@ -405,4 +419,45 @@ export const setSessionMode = createServerFn({ method: "POST" })
       .eq("user_id", context.userId);
     if (error) throw new Error(error.message);
     return { ok: true };
+  });
+
+// ---------- Debug: verification stats for the last 5 sessions ----------
+export const verificationDebug = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data, error } = await context.supabase
+      .from("tutor_sessions")
+      .select("id, problem_text, created_at, step_history")
+      .eq("user_id", context.userId)
+      .order("created_at", { ascending: false })
+      .limit(5);
+    if (error) throw new Error(error.message);
+
+    return (data ?? []).map((row) => {
+      const history = (row.step_history as unknown as CompletedStep[]) ?? [];
+      const steps = history.map((h, i) => ({
+        index: i + 1,
+        title: h.title,
+        result: h.result,
+        check_expression: h.check_expression,
+        computed: h.computed ?? null,
+        verified: h.verified,
+        verified_ok: h.verified_ok,
+        skipped: h.skipped ?? false,
+        retried: h.retried ?? false,
+      }));
+      return {
+        sessionId: row.id,
+        problem: row.problem_text,
+        createdAt: row.created_at,
+        totals: {
+          steps: steps.length,
+          retried: steps.filter((s) => s.retried).length,
+          failed: steps.filter((s) => !s.verified_ok && !s.skipped).length,
+          skipped: steps.filter((s) => s.skipped).length,
+          verified: steps.filter((s) => s.verified_ok && !s.skipped).length,
+        },
+        steps,
+      };
+    });
   });
