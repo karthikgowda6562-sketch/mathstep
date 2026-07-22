@@ -57,13 +57,19 @@ export const createTutorSession = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { callGeminiJSON } = await import("./ai.server");
 
-    const systemPrompt = `You are the PLANNER for a rigorous step-by-step math tutor.
+    const systemPrompt = `You are the PLANNER for a step-by-step math tutor.
 Your ONLY job is to name the steps required to solve the problem correctly.
 Do NOT solve the problem. Do NOT reveal intermediate results or the final answer.
 Think carefully about the correct mathematical approach before naming steps. Respect order of operations (PEMDAS/BODMAS), algebraic identities, calculus rules, geometry theorems, and unit consistency.
 Return strict JSON: {"domain": string, "difficulty": "easy"|"medium"|"hard", "steps": [{"id": "s1", "title": "short step name"}]}
-Use 2 to 8 steps. Titles must be short (max 70 chars) and describe WHAT will be done (e.g. "Apply the quadratic formula", "Isolate x"), not the answer.
-The FINAL step must state or verify the answer (e.g. "State the final answer" or "Verify by substitution").`;
+
+SCALE THE NUMBER OF STEPS TO THE DIFFICULTY — do not pad a plan with ceremony steps:
+- "easy" problems (simple arithmetic, reducing a fraction, one-step algebra, unit conversion): use 2-3 steps total. Combine related work (e.g. "divide top and bottom by 4" IS the simplification — no separate GCD step, no separate decimal-conversion step unless the problem asks for a decimal).
+- "medium" problems: 3-5 steps.
+- "hard"/"advanced" problems: 5-8 steps with proper rigor.
+
+Titles must be short (max 70 chars) and describe WHAT will be done (e.g. "Divide top and bottom by 4", "Apply the quadratic formula"), not the answer.
+The FINAL step must state or verify the answer.`;
 
     const userContent: Array<
       { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }
