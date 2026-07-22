@@ -171,7 +171,7 @@ export function verifyResult(
 
 function logVerification(
   claimed: string,
-  checkExpr: string | null,
+  checkExpr: string | null | undefined,
   outcome: VerifyOutcome,
 ) {
   try {

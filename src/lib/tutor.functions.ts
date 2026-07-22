@@ -149,11 +149,18 @@ Solve ONLY the current step. Return strict JSON:
   "explanation": string,        // 1-3 short sentences in plain English, WHY this step is done
   "calculation": string,        // the math work for this step. Wrap formulas in $...$ (LaTeX). Show every arithmetic simplification explicitly.
   "result": string,             // the resulting value or expression of THIS step only. Prefer exact form; add "≈ <decimal>" when helpful.
-  "check_expression": string,   // a literal, exact, plain mathjs-evaluable expression whose value equals the numeric value of result (e.g. "(12+8)/4"). No LaTeX, no words, no units. For solved variables, use the numeric/exact value only. If the result is purely symbolic with unbound variables, return "".
+  "check_expression": string | null,   // see STRICT RULES below
   "guiding_question": string    // one short question a tutor could ask before showing the calculation
 }
 
-mathjs syntax for check_expression: use *, /, +, -, ^, sqrt(), abs(), sin/cos/tan (radians), log(x) is natural log, log10(x), pi, e. Substitute concrete numbers for any variable that already has a value from prior steps. check_expression must be a literal, exact evaluable math expression because it will be checked by a real calculator.`;
+STRICT RULES for check_expression (a real calculator will evaluate this):
+- It must be ONLY a raw evaluable mathjs expression using numbers and operators: + - * / ^ ( ) and functions sqrt(), abs(), sin(), cos(), tan(), log(), log10(), plus constants pi, e.
+- NEVER include variable names (no x, y, n, etc.), equals signs, units, words, LaTeX, or commentary.
+- If the step's result is an equation like "x = 4", check_expression is just the numeric value: 4
+- If the step's result is symbolic (e.g. simplifying an expression, with unbound variables) and there is no single numeric value to check, set check_expression to null (JSON null) and verification will be skipped for this step.
+- Substitute concrete numbers for any variable that already has a value from prior steps.
+- log(x) is natural log; use log10(x) for base-10; trig is in radians.
+- Before returning, mentally evaluate check_expression and confirm its numeric value equals the numeric value of "result".`;
 
     const historyText = history.length
       ? history
