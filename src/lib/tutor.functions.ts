@@ -43,9 +43,9 @@ interface ExecutorResponse {
   guiding_question?: string;
 }
 
-function executorModelForDifficulty(difficulty: string | null | undefined): string {
-  const d = (difficulty ?? "medium").toLowerCase();
-  return d === "hard" || d === "advanced" ? EXECUTOR_MODEL_PRO : EXECUTOR_MODEL_FAST;
+function executorModelForDifficulty(_difficulty: string | null | undefined): string {
+  // Always start with Flash for speed; Pro is reserved for retry-after-failure.
+  return EXECUTOR_MODEL_FAST;
 }
 
 // ---------- Create session (planner) ----------
