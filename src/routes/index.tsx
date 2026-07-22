@@ -8,7 +8,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { Sparkles, ImagePlus, X, LogOut, History, Calculator } from "lucide-react";
+import { Sparkles, ImagePlus, X, LogOut, History } from "lucide-react";
+import { FormulaPicker } from "@/components/FormulaPicker";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -39,6 +40,23 @@ function Landing() {
   const [loading, setLoading] = useState(false);
   const [session, setSession] = useState<{ email?: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  function insertFormula(template: string) {
+    setProblem(template);
+    // Focus and select first `___` placeholder so user can type immediately.
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      const idx = template.indexOf("___");
+      if (idx >= 0) {
+        el.setSelectionRange(idx, idx + 3);
+      } else {
+        el.setSelectionRange(template.length, template.length);
+      }
+    });
+  }
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -95,11 +113,6 @@ function Landing() {
           </span>
         </Link>
         <nav className="flex items-center gap-2 text-sm">
-          <Link to="/formulas">
-            <Button variant="ghost" size="sm">
-              <Calculator className="mr-1 h-4 w-4" /> Formulas
-            </Button>
-          </Link>
           {session ? (
             <>
               <Link to="/history">
@@ -144,6 +157,7 @@ function Landing() {
           </Label>
           <Textarea
             id="problem"
+            ref={textareaRef}
             value={problem}
             onChange={(e) => setProblem(e.target.value)}
             placeholder="e.g. Solve for x: 3(x - 4) + 2 = 5x - 6"
@@ -178,6 +192,10 @@ function Landing() {
                 <ImagePlus className="mr-1 h-4 w-4" />
                 Upload image
               </Button>
+
+              <FormulaPicker onInsert={insertFormula} />
+
+
 
               <div className="flex items-center gap-2">
                 <Switch
