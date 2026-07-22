@@ -116,7 +116,7 @@ function tryParseJson<T>(raw: string): { ok: true; value: T } | { ok: false } {
 }
 
 function hasPotentialBareLatex(raw: string): boolean {
-  return /\(?:begin|end|times|cdot|div|frac|sqrt|left|right|pmatrix|bmatrix|matrix|theta|alpha|beta|gamma|delta|pi|sin|cos|tan|log|ln|sum|int|lim|approx|leq|geq|neq|infty|text|mathbf|mathbb|overline|hat|bar|vec|dots|ldots|cdots)\b/.test(raw);
+  return /\\(?:begin|end|times|cdot|div|frac|sqrt|left|right|pmatrix|bmatrix|matrix|theta|alpha|beta|gamma|delta|pi|sin|cos|tan|log|ln|sum|int|lim|approx|leq|geq|neq|infty|text|mathbf|mathbb|overline|hat|bar|vec|dots|ldots|cdots)\b/.test(raw);
 }
 
 function repairJson(raw: string): string | null {
