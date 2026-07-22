@@ -4,7 +4,8 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 // Use the strongest available Gemini for accuracy on math reasoning.
 const PLANNER_MODEL = "google/gemini-2.5-pro";
-const EXECUTOR_MODEL = "google/gemini-2.5-pro";
+const EXECUTOR_MODEL_FAST = "google/gemini-2.5-flash";
+const EXECUTOR_MODEL_PRO = "google/gemini-2.5-pro";
 const EXPLAIN_MODEL = "google/gemini-2.5-flash";
 
 // ---------- Types ----------
@@ -40,6 +41,11 @@ interface ExecutorResponse {
   result: string;
   check_expression: string | null;
   guiding_question?: string;
+}
+
+function executorModelForDifficulty(difficulty: string | null | undefined): string {
+  const d = (difficulty ?? "medium").toLowerCase();
+  return d === "hard" || d === "advanced" ? EXECUTOR_MODEL_PRO : EXECUTOR_MODEL_FAST;
 }
 
 // ---------- Create session (planner) ----------
