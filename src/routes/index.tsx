@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { Sparkles, ImagePlus, X, LogOut, History } from "lucide-react";
+import { Sparkles, ImagePlus, X, LogOut, History, Calculator } from "lucide-react";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -95,6 +95,11 @@ function Landing() {
           </span>
         </Link>
         <nav className="flex items-center gap-2 text-sm">
+          <Link to="/formulas">
+            <Button variant="ghost" size="sm">
+              <Calculator className="mr-1 h-4 w-4" /> Formulas
+            </Button>
+          </Link>
           {session ? (
             <>
               <Link to="/history">
