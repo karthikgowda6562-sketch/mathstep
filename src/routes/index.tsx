@@ -11,6 +11,22 @@ import { toast } from "sonner";
 import { Sparkles, ImagePlus, X, LogOut, History } from "lucide-react";
 
 export const Route = createFileRoute("/")({
+  head: () => ({
+    meta: [
+      { title: "MathStep — Verified AI Math Tutor" },
+      {
+        name: "description",
+        content: "MathStep breaks math problems into verified, plain-spoken steps with follow-up explanations.",
+      },
+      { property: "og:title", content: "MathStep — Verified AI Math Tutor" },
+      {
+        property: "og:description",
+        content: "Solve math problems one verified step at a time with a patient AI tutor.",
+      },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
+    ],
+  }),
   component: Landing,
 });
 
