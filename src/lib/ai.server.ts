@@ -165,9 +165,11 @@ function escapeBareBackslashesInJsonStrings(raw: string): string {
 
     if (inString && char === "\\") {
       if (next === '"' || next === "\\" || next === "/") {
-        output += char;
+        output += char + next;
+        i += 1;
       } else if (next === "u" && /^[0-9a-fA-F]{4}$/.test(raw.slice(i + 2, i + 6))) {
-        output += char;
+        output += raw.slice(i, i + 6);
+        i += 5;
       } else {
         output += "\\\\";
       }
