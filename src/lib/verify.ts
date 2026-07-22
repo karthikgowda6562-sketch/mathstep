@@ -56,6 +56,60 @@ export function safeEvaluate(expr: string): number | null {
   }
 }
 
+// Evaluate a mathjs expression that yields a 2D matrix. Matrix expressions
+// use commas as element separators, so we must NOT strip commas the way
+// scalar normalizeMathInput does. Returns null if the expression can't be
+// evaluated to a rectangular numeric matrix.
+export function safeEvaluateMatrix(expr: string): number[][] | null {
+  const trimmed = (expr ?? "")
+    .trim()
+    .replace(/\$\$?/g, "")
+    .replace(/\\left|\\right/g, "")
+    .replace(/\\cdot|\\times/g, "*")
+    .replace(/\\div/g, "/");
+  if (!trimmed) return null;
+  try {
+    const v = evaluate(trimmed) as unknown;
+    let arr: unknown;
+    if (Array.isArray(v)) {
+      arr = v;
+    } else if (v && typeof v === "object" && typeof (v as { toArray?: () => unknown }).toArray === "function") {
+      arr = (v as { toArray: () => unknown }).toArray();
+    } else {
+      return null;
+    }
+    if (!Array.isArray(arr) || arr.length === 0) return null;
+    // Wrap a plain vector as a single-row matrix so downstream code always
+    // gets a 2D grid.
+    let rows: unknown[] = arr;
+    if (!Array.isArray(rows[0])) rows = [rows];
+    const width = (rows[0] as unknown[]).length;
+    const out: number[][] = [];
+    for (const row of rows) {
+      if (!Array.isArray(row) || row.length !== width) return null;
+      const numeric = row.map((n) => Number(n));
+      if (numeric.some((n) => !Number.isFinite(n))) return null;
+      out.push(numeric);
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+// Compare two numeric matrices element-by-element with tolerance.
+export function matricesEqual(a: number[][], b: number[][], tol = 1e-6): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i].length !== b[i].length) return false;
+    for (let j = 0; j < a[i].length; j += 1) {
+      const scale = Math.max(1, Math.abs(a[i][j]), Math.abs(b[i][j]));
+      if (Math.abs(a[i][j] - b[i][j]) > Math.max(tol, scale * 1e-4)) return false;
+    }
+  }
+  return true;
+}
+
 function candidateExpressions(claimed: string): string[] {
   const normalized = normalizeMathInput(claimed);
   const candidates = new Set<string>();
