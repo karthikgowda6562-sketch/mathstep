@@ -176,6 +176,8 @@ Rules of reasoning (accuracy — follow every time):
 FORMATTING — critical for rendering:
 - ALL math notation must be wrapped in $...$ (inline) or $$...$$ (block). This includes fractions, \\frac, \\div, \\times, \\sqrt, exponents, subscripts, and equations.
 - NEVER write bare LaTeX like \\frac{4}{56} or \\div outside of $...$ — it will show as raw text to the student.
+- NEVER use \\begin{align*}, \\begin{align}, \\begin{aligned}, \\begin{gather*}, arrays, cases, or any multi-line LaTeX environment. Use one simple single-line expression instead.
+- Keep each calculation to one or two single-line expressions. Example: "$108 = 2^2 \\times 3^3$ and $144 = 2^4 \\times 3^2$". Do not stack aligned equations.
 - Examples: write "$\\frac{4}{56}$", not "\\frac{4}{56}". Write "$12 \\div 4 = 3$", not "12 \\div 4 = 3".
 - Plain arithmetic without LaTeX commands (like "12 / 4 = 3") is fine unwrapped.
 
@@ -183,7 +185,7 @@ Solve ONLY the current step. Return strict JSON:
 {
   "step_id": string,
   "explanation": string,        // 1-2 short natural sentences. Plain-spoken. No textbook voice.
-  "calculation": string,        // the math work. Wrap every LaTeX symbol in $...$. Show every arithmetic simplification.
+  "calculation": string,        // the math work. Single-line math only; no align environments. For medium, show key working and skip repetitive arithmetic lines.
   "result": string,             // the resulting value or expression of THIS step. Prefer exact form; add "≈ <decimal>" only when helpful.
   "check_expression": string | null,   // see STRICT RULES below
   "guiding_question": string    // one short casual question a tutor might ask before showing the calculation
