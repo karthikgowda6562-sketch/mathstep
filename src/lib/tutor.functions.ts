@@ -211,9 +211,9 @@ STRICT RULES for check_expression (a real calculator will evaluate this):
       .map((s, i) => `${i + 1}. ${s.title}`)
       .join("\n")}\n\nCompleted so far:\n${historyText}\n\nCurrent step to solve: ${idx + 1}. ${currentStep.title} (id=${currentStep.id})`;
 
-    async function askExecutor(extraNote?: string) {
+    async function askExecutor(extraNote?: string, modelOverride?: string) {
       return callGeminiJSON<ExecutorResponse>({
-        model: executorModel,
+        model: modelOverride ?? executorModel,
         temperature: 0.1,
         messages: [
           { role: "system", content: systemPrompt },
@@ -239,18 +239,36 @@ STRICT RULES for check_expression (a real calculator will evaluate this):
 
     let check = verifyResult(exec.result, exec.check_expression);
     let retried = false;
+
+    function buildCorrectionNote(prev: ExecutorResponse, c: typeof check) {
+      return `Your previous result was wrong. Recheck your work step by step and try again.
+
+Details from the independent calculator: result="${prev.result}"; check_expression=${JSON.stringify(prev.check_expression)}; computed check value=${c.computed ?? "not evaluable"}; parsed claimed value=${c.claimed ?? "not evaluable"}; reason=${c.reason}. The check_expression must be a literal exact numeric math expression (no variables, no words, no units) whose value equals the numeric value of result. If this step is purely symbolic, return check_expression: null.`;
+    }
+
+    // First retry — same (fast) model.
     if (!check.ok && !check.skipped) {
       retried = true;
-      const note = `Your previous result was wrong. Recheck your work step by step and try again.
-
-Details from the independent calculator: result="${exec.result}"; check_expression=${JSON.stringify(exec.check_expression)}; computed check value=${check.computed ?? "not evaluable"}; parsed claimed value=${check.claimed ?? "not evaluable"}; reason=${check.reason}. The check_expression must be a literal exact numeric math expression (no variables, no words, no units) whose value equals the numeric value of result. If this step is purely symbolic, return check_expression: null.`;
       try {
-        const retryExec = await askExecutor(note);
+        const retryExec = await askExecutor(buildCorrectionNote(exec, check));
         exec = retryExec;
         check = verifyResult(exec.result, exec.check_expression);
       } catch (err) {
-        // Retry failed to parse — keep original result and flag for review
         console.warn("Executor retry failed:", err);
+      }
+    }
+
+    // Second retry — escalate to Pro for accuracy on this one step only.
+    if (!check.ok && !check.skipped) {
+      try {
+        const proExec = await askExecutor(
+          `${buildCorrectionNote(exec, check)}\n\nThis is a final recalculation attempt — take extra care and be exact.`,
+          EXECUTOR_MODEL_PRO,
+        );
+        exec = proExec;
+        check = verifyResult(exec.result, exec.check_expression);
+      } catch (err) {
+        console.warn("Executor Pro recalculation failed:", err);
       }
     }
 
