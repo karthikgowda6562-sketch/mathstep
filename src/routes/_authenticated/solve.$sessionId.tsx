@@ -238,20 +238,24 @@ function SolvePage() {
           </div>
         )}
 
-        {isComplete && session.final_answer && (
-          <div className="mt-10 rounded-2xl border-2 border-primary/20 bg-primary/5 p-6">
-            <div className="flex items-center gap-2 text-primary">
-              <Sparkles className="h-5 w-5" />
-              <p className="text-sm font-medium uppercase tracking-wide">Final answer</p>
+        {isComplete && (() => {
+          const last = session.step_history[session.step_history.length - 1];
+          if (!last) return null;
+          return (
+            <div className="mt-10 rounded-2xl border-2 border-primary/20 bg-primary/5 p-6">
+              <div className="flex items-center gap-2 text-primary">
+                <Sparkles className="h-5 w-5" />
+                <p className="text-sm font-medium uppercase tracking-wide">Final answer</p>
+              </div>
+              <div className="mt-3 font-serif-display text-3xl font-semibold">
+                <StepResult step={last} large />
+              </div>
+              <div className="mt-6">
+                <Button onClick={onSimilar}>Generate a similar practice problem</Button>
+              </div>
             </div>
-            <div className="mt-3 font-serif-display text-3xl font-semibold">
-              <MathText text={session.final_answer} />
-            </div>
-            <div className="mt-6">
-              <Button onClick={onSimilar}>Generate a similar practice problem</Button>
-            </div>
-          </div>
-        )}
+          );
+        })()}
       </main>
     </div>
   );
