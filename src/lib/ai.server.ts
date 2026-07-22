@@ -85,13 +85,22 @@ function jsonCandidates(text: string): string[] {
 }
 
 function tryParseJson<T>(raw: string): { ok: true; value: T } | { ok: false } {
+  // Gemini sometimes returns otherwise-valid JSON with bare LaTeX backslashes
+  // inside strings, e.g. "\times" or "\begin{pmatrix}". Bare backslashes are
+  // invalid JSON and can also be misread as valid \t / \b / \f escapes, silently
+  // corrupting math text. If the raw body looks LaTeX-heavy, repair first.
+  if (hasPotentialBareLatex(raw)) {
+    try {
+      return { ok: true, value: JSON.parse(escapeBareBackslashesInJsonStrings(raw)) as T };
+    } catch {
+      // fall through to normal parsing/repair
+    }
+  }
+
   try {
     return { ok: true, value: JSON.parse(raw) as T };
   } catch {
-    // Gemini sometimes returns otherwise-valid JSON with bare LaTeX backslashes
-    // inside strings, e.g. "\times" or "\begin{pmatrix}". Bare backslashes are
-    // invalid JSON and can also be misread as \t / \b escapes. Repair those before
-    // giving up so LaTeX-heavy math steps do not crash the solver.
+    // fall through to repair strategies
   }
 
   for (const candidate of [escapeBareBackslashesInJsonStrings(raw), repairJson(raw)]) {
@@ -104,6 +113,10 @@ function tryParseJson<T>(raw: string): { ok: true; value: T } | { ok: false } {
   }
 
   return { ok: false };
+}
+
+function hasPotentialBareLatex(raw: string): boolean {
+  return /\(?:begin|end|times|cdot|div|frac|sqrt|left|right|pmatrix|bmatrix|matrix|theta|alpha|beta|gamma|delta|pi|sin|cos|tan|log|ln|sum|int|lim|approx|leq|geq|neq|infty|text|mathbf|mathbb|overline|hat|bar|vec|dots|ldots|cdots)\b/.test(raw);
 }
 
 function repairJson(raw: string): string | null {
