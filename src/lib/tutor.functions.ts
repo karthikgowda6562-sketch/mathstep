@@ -213,7 +213,7 @@ STRICT RULES for check_expression (a real calculator will evaluate this):
 
     async function askExecutor(extraNote?: string) {
       return callGeminiJSON<ExecutorResponse>({
-        model: EXECUTOR_MODEL,
+        model: executorModel,
         temperature: 0.1,
         messages: [
           { role: "system", content: systemPrompt },
@@ -352,7 +352,7 @@ export const checkGuidedAnswer = createServerFn({ method: "POST" })
       verdict: "correct" | "partial" | "incorrect";
       feedback: string;
     }>({
-      model: EXECUTOR_MODEL,
+      model: EXECUTOR_MODEL_FAST,
       temperature: 0.2,
       messages: [
         {
