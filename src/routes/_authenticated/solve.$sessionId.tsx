@@ -85,22 +85,29 @@ function SolvePage() {
 
   const total = session?.plan?.steps?.length ?? 0;
   const done = session?.current_step_index ?? 0;
-  const isComplete = !!session && done >= total && total > 0;
+  const isFailed = session?.status === "failed";
+  const isComplete = !!session && !isFailed && done >= total && total > 0;
 
   const revealNext = useCallback(async () => {
     setLoadingStep(true);
     try {
       const res = await nextStep({ data: { sessionId } });
+      // If the server discarded the chain to retry the whole problem, refetch fresh state.
+      if ((res as { restarted?: boolean }).restarted) {
+        await refresh();
+        return;
+      }
       if (res.step) setJustRevealedId(res.step.step_id);
       setSession((prev) => {
         if (!prev || !res.step) return prev;
         const nextIndex = res.currentIndex ?? prev.current_step_index + 1;
+        const failed = (res as { failed?: boolean }).failed === true;
         return {
           ...prev,
           step_history: [...prev.step_history, res.step],
           current_step_index: nextIndex,
-          status: res.done ? "complete" : "in_progress",
-          final_answer: res.done ? res.step.result : prev.final_answer,
+          status: failed ? "failed" : res.done ? "complete" : "in_progress",
+          final_answer: failed ? null : res.done ? res.step.result : prev.final_answer,
         };
       });
     } catch (e) {
@@ -108,7 +115,7 @@ function SolvePage() {
     } finally {
       setLoadingStep(false);
     }
-  }, [nextStep, sessionId]);
+  }, [nextStep, sessionId, refresh]);
 
   // Auto-reveal steps one after another until the problem is solved
   useEffect(() => {
