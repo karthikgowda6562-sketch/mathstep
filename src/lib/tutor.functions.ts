@@ -23,10 +23,12 @@ export interface CompletedStep {
   explanation: string;
   calculation: string;
   result: string;
-  check_expression: string;
+  check_expression: string | null;
   guiding_question?: string;
   verified: boolean;
   verified_ok: boolean;
+  skipped?: boolean;
+  retried?: boolean;
   computed?: number | null;
   verification_warning?: string;
 }
@@ -36,7 +38,7 @@ interface ExecutorResponse {
   explanation: string;
   calculation: string;
   result: string;
-  check_expression: string;
+  check_expression: string | null;
   guiding_question?: string;
 }
 
@@ -188,19 +190,22 @@ STRICT RULES for check_expression (a real calculator will evaluate this):
 
     let exec = await askExecutor();
     let check = verifyResult(exec.result, exec.check_expression);
-    if (!check.ok) {
+    let retried = false;
+    if (!check.ok && !check.skipped) {
+      retried = true;
       const note = `Your previous result was wrong. Recheck your work step by step and try again.
 
-Details from the independent calculator: result="${exec.result}"; check_expression="${exec.check_expression}"; computed check value=${check.computed ?? "not evaluable"}; parsed claimed value=${check.claimed ?? "not evaluable"}. The check_expression must be a literal exact math expression that evaluates to the same numeric value as result.`;
+Details from the independent calculator: result="${exec.result}"; check_expression=${JSON.stringify(exec.check_expression)}; computed check value=${check.computed ?? "not evaluable"}; parsed claimed value=${check.claimed ?? "not evaluable"}; reason=${check.reason}. The check_expression must be a literal exact numeric math expression (no variables, no words, no units) whose value equals the numeric value of result. If this step is purely symbolic, return check_expression: null.`;
       exec = await askExecutor(note);
       check = verifyResult(exec.result, exec.check_expression);
     }
 
-    const verificationWarning = check.ok
-      ? undefined
-      : check.computed == null
-        ? "Please double-check this step — its calculator check could not be evaluated."
-        : "Please double-check this step — its result did not match the calculator check.";
+    const verificationWarning =
+      check.ok
+        ? undefined
+        : check.computed == null
+          ? "Please double-check this step — its calculator check could not be evaluated."
+          : "Please double-check this step — its result did not match the calculator check.";
 
     const completed: CompletedStep = {
       step_id: currentStep.id,
@@ -208,10 +213,12 @@ Details from the independent calculator: result="${exec.result}"; check_expressi
       explanation: exec.explanation,
       calculation: exec.calculation,
       result: exec.result,
-      check_expression: exec.check_expression,
+      check_expression: exec.check_expression ?? null,
       guiding_question: exec.guiding_question,
       verified: check.verified,
       verified_ok: check.ok,
+      skipped: check.skipped,
+      retried,
       computed: check.computed,
       verification_warning: verificationWarning,
     };
