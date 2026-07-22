@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthenticatedVerifyDebugRouteImport } from './routes/_authenticated/verify-debug'
 import { Route as AuthenticatedHistoryRouteImport } from './routes/_authenticated/history'
 import { Route as AuthenticatedSolveSessionIdRouteImport } from './routes/_authenticated/solve.$sessionId'
 
@@ -29,6 +30,12 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedVerifyDebugRoute =
+  AuthenticatedVerifyDebugRouteImport.update({
+    id: '/verify-debug',
+    path: '/verify-debug',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedHistoryRoute = AuthenticatedHistoryRouteImport.update({
   id: '/history',
   path: '/history',
@@ -45,12 +52,14 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/history': typeof AuthenticatedHistoryRoute
+  '/verify-debug': typeof AuthenticatedVerifyDebugRoute
   '/solve/$sessionId': typeof AuthenticatedSolveSessionIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/history': typeof AuthenticatedHistoryRoute
+  '/verify-debug': typeof AuthenticatedVerifyDebugRoute
   '/solve/$sessionId': typeof AuthenticatedSolveSessionIdRoute
 }
 export interface FileRoutesById {
@@ -59,19 +68,21 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
   '/_authenticated/history': typeof AuthenticatedHistoryRoute
+  '/_authenticated/verify-debug': typeof AuthenticatedVerifyDebugRoute
   '/_authenticated/solve/$sessionId': typeof AuthenticatedSolveSessionIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth' | '/history' | '/solve/$sessionId'
+  fullPaths: '/' | '/auth' | '/history' | '/verify-debug' | '/solve/$sessionId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/history' | '/solve/$sessionId'
+  to: '/' | '/auth' | '/history' | '/verify-debug' | '/solve/$sessionId'
   id:
     | '__root__'
     | '/'
     | '/_authenticated'
     | '/auth'
     | '/_authenticated/history'
+    | '/_authenticated/verify-debug'
     | '/_authenticated/solve/$sessionId'
   fileRoutesById: FileRoutesById
 }
@@ -104,6 +115,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/verify-debug': {
+      id: '/_authenticated/verify-debug'
+      path: '/verify-debug'
+      fullPath: '/verify-debug'
+      preLoaderRoute: typeof AuthenticatedVerifyDebugRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/history': {
       id: '/_authenticated/history'
       path: '/history'
@@ -123,11 +141,13 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedHistoryRoute: typeof AuthenticatedHistoryRoute
+  AuthenticatedVerifyDebugRoute: typeof AuthenticatedVerifyDebugRoute
   AuthenticatedSolveSessionIdRoute: typeof AuthenticatedSolveSessionIdRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedHistoryRoute: AuthenticatedHistoryRoute,
+  AuthenticatedVerifyDebugRoute: AuthenticatedVerifyDebugRoute,
   AuthenticatedSolveSessionIdRoute: AuthenticatedSolveSessionIdRoute,
 }
 
