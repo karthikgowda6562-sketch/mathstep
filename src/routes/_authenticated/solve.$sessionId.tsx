@@ -220,6 +220,24 @@ function SolvePage() {
           })}
         </ol>
 
+        {isFailed && (
+          <div className="mt-10 rounded-2xl border-2 border-destructive/30 bg-destructive/5 p-6">
+            <div className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              <p className="text-sm font-medium uppercase tracking-wide">Couldn't verify an answer</p>
+            </div>
+            <p className="mt-3 text-[15px] leading-relaxed">
+              {session.failure_reason ??
+                "I'm having trouble solving this one accurately — please try rephrasing the problem."}
+            </p>
+            <div className="mt-6">
+              <Link to="/">
+                <Button variant="outline">Start a new problem</Button>
+              </Link>
+            </div>
+          </div>
+        )}
+
         {isComplete && session.final_answer && (
           <div className="mt-10 rounded-2xl border-2 border-primary/20 bg-primary/5 p-6">
             <div className="flex items-center gap-2 text-primary">
