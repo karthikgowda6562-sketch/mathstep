@@ -224,7 +224,21 @@ STRICT RULES for check_expression (a real calculator will evaluate this):
       });
     }
 
-    let exec = await askExecutor();
+    let exec: ExecutorResponse;
+    try {
+      exec = await askExecutor();
+    } catch (err) {
+      console.warn("Executor returned malformed JSON:", err);
+      exec = {
+        step_id: currentStep.id,
+        explanation: "I had trouble formatting this step, so please double-check it.",
+        calculation: "The AI response for this step could not be read safely.",
+        result: "Needs review",
+        check_expression: null,
+        guiding_question: "What should we check before moving on?",
+      };
+    }
+
     let check = verifyResult(exec.result, exec.check_expression);
     let retried = false;
     if (!check.ok && !check.skipped) {
