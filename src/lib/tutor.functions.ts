@@ -2,8 +2,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
-// Use the strongest available Gemini for accuracy on math reasoning.
-const PLANNER_MODEL = "google/gemini-2.5-pro";
+// Default to fast Flash for speed; escalate to Pro only when verification fails.
+const PLANNER_MODEL = "google/gemini-2.5-flash";
 const EXECUTOR_MODEL_FAST = "google/gemini-2.5-flash";
 const EXECUTOR_MODEL_PRO = "google/gemini-2.5-pro";
 const EXPLAIN_MODEL = "google/gemini-2.5-flash";
