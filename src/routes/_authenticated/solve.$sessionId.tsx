@@ -441,11 +441,11 @@ function StepItem(props: {
               <MathText text={completed.calculation} />
             </div>
           )}
-          <div className="mt-3 flex items-baseline gap-2 text-sm">
-            <span className="text-muted-foreground">Result:</span>
-            <span className="font-medium">
-              <MathText text={completed.result} />
-            </span>
+          <div className="mt-3 text-sm">
+            <div className="text-muted-foreground">Result:</div>
+            <div className="mt-1 font-medium">
+              <StepResult step={completed} />
+            </div>
           </div>
 
           <div className="mt-4 border-t pt-4">
