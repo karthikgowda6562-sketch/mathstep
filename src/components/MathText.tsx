@@ -37,8 +37,8 @@ function stripAlignMarkers(line: string): string {
 
 function normalizeUnsupportedEnvironments(text: string): string {
   return text.replace(
-    /\\begin\{(align\*?|aligned|gather\*?|gathered)\}([\s\S]*?)\\end\{\1\}/g,
-    (_, _env: string, body: string) => {
+    /(\$\$)?\s*\\begin\{(align\*?|aligned|gather\*?|gathered)\}([\s\S]*?)\\end\{\2\}\s*(\$\$)?/g,
+    (_, _open: string | undefined, _env: string, body: string) => {
       const lines = body
         .split(/\\\\/g)
         .map(stripAlignMarkers)
