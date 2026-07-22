@@ -1,3 +1,5 @@
+import { jsonrepair } from "jsonrepair";
+
 // Server-only helper for calling Lovable AI Gateway (Gemini).
 const GATEWAY_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
 
@@ -43,27 +45,162 @@ export async function callGeminiJSON<T>(opts: {
 
   const data = await res.json();
   const text: string = data?.choices?.[0]?.message?.content ?? "";
-  const cleaned = text
-    .replace(/^\uFEFF/, "")
-    .replace(/```(?:json)?\s*([\s\S]*?)```/gi, "$1")
-    .trim();
-  try {
-    return JSON.parse(cleaned) as T;
-  } catch {
-    const first = cleaned.indexOf("{");
-    const last = cleaned.lastIndexOf("}");
-    if (first !== -1 && last > first) {
-      try {
-        return JSON.parse(cleaned.slice(first, last + 1)) as T;
-      } catch {
-        /* fall through */
-      }
-    }
-    const preview = cleaned.slice(0, 200).replace(/\s+/g, " ");
-    throw new Error(
-      `AI returned non-JSON response${preview ? ` (starts with: "${preview}")` : " (empty response)"}`,
-    );
+  const cleaned = cleanJsonResponse(text);
+  const candidates = jsonCandidates(cleaned);
+
+  for (const candidate of candidates) {
+    const parsed = tryParseJson<T>(candidate);
+    if (parsed.ok) return parsed.value;
   }
+
+  const preview = cleaned.slice(0, 200).replace(/\s+/g, " ");
+  throw new Error(
+    `AI returned non-JSON response${preview ? ` (starts with: "${preview}")` : " (empty response)"}`,
+  );
+}
+
+function cleanJsonResponse(text: string): string {
+  return text
+    .replace(/^\uFEFF/, "")
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/```$/i, "")
+    .trim();
+}
+
+function jsonCandidates(text: string): string[] {
+  const candidates = new Set<string>();
+  const add = (value: string | null) => {
+    const trimmed = value?.trim();
+    if (trimmed) candidates.add(trimmed);
+  };
+
+  add(text);
+  add(extractBalancedJsonObject(text));
+
+  const first = text.indexOf("{");
+  const last = text.lastIndexOf("}");
+  if (first !== -1 && last > first) add(text.slice(first, last + 1));
+
+  return [...candidates];
+}
+
+function tryParseJson<T>(raw: string): { ok: true; value: T } | { ok: false } {
+  // Gemini sometimes returns otherwise-valid JSON with bare LaTeX backslashes
+  // inside strings, e.g. "\times" or "\begin{pmatrix}". Bare backslashes are
+  // invalid JSON and can also be misread as valid \t / \b / \f escapes, silently
+  // corrupting math text. If the raw body looks LaTeX-heavy, repair first.
+  if (hasPotentialBareLatex(raw)) {
+    try {
+      return { ok: true, value: JSON.parse(escapeBareBackslashesInJsonStrings(raw)) as T };
+    } catch {
+      // fall through to normal parsing/repair
+    }
+  }
+
+  try {
+    return { ok: true, value: JSON.parse(raw) as T };
+  } catch {
+    // fall through to repair strategies
+  }
+
+  for (const candidate of [escapeBareBackslashesInJsonStrings(raw), repairJson(raw)]) {
+    if (!candidate) continue;
+    try {
+      return { ok: true, value: JSON.parse(candidate) as T };
+    } catch {
+      // try next repair strategy
+    }
+  }
+
+  return { ok: false };
+}
+
+function hasPotentialBareLatex(raw: string): boolean {
+  return /\\(?:begin|end|times|cdot|div|frac|sqrt|left|right|pmatrix|bmatrix|matrix|theta|alpha|beta|gamma|delta|pi|sin|cos|tan|log|ln|sum|int|lim|approx|leq|geq|neq|infty|text|mathbf|mathbb|overline|hat|bar|vec|dots|ldots|cdots)\b/.test(raw);
+}
+
+function repairJson(raw: string): string | null {
+  try {
+    return jsonrepair(raw);
+  } catch {
+    return null;
+  }
+}
+
+function extractBalancedJsonObject(text: string): string | null {
+  const start = text.indexOf("{");
+  if (start === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = start; i < text.length; i += 1) {
+    const char = text[i];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+    } else if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+
+  return null;
+}
+
+function escapeBareBackslashesInJsonStrings(raw: string): string {
+  let output = "";
+  let inString = false;
+
+  for (let i = 0; i < raw.length; i += 1) {
+    const char = raw[i];
+    const next = raw[i + 1];
+
+    if (char === '"' && !isEscaped(raw, i)) {
+      inString = !inString;
+      output += char;
+      continue;
+    }
+
+    if (inString && char === "\\") {
+      if (next === '"' || next === "\\" || next === "/") {
+        output += char + next;
+        i += 1;
+      } else if (next === "u" && /^[0-9a-fA-F]{4}$/.test(raw.slice(i + 2, i + 6))) {
+        output += raw.slice(i, i + 6);
+        i += 5;
+      } else {
+        output += "\\\\";
+      }
+      continue;
+    }
+
+    output += char;
+  }
+
+  return output;
+}
+
+function isEscaped(text: string, index: number): boolean {
+  let slashCount = 0;
+  for (let i = index - 1; i >= 0 && text[i] === "\\"; i -= 1) {
+    slashCount += 1;
+  }
+  return slashCount % 2 === 1;
 }
 
 export async function callGeminiText(opts: {
