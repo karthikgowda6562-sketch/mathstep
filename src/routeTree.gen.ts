@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as FormulasRouteImport } from './routes/formulas'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
@@ -16,6 +17,11 @@ import { Route as AuthenticatedVerifyDebugRouteImport } from './routes/_authenti
 import { Route as AuthenticatedHistoryRouteImport } from './routes/_authenticated/history'
 import { Route as AuthenticatedSolveSessionIdRouteImport } from './routes/_authenticated/solve.$sessionId'
 
+const FormulasRoute = FormulasRouteImport.update({
+  id: '/formulas',
+  path: '/formulas',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
@@ -51,6 +57,7 @@ const AuthenticatedSolveSessionIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/formulas': typeof FormulasRoute
   '/history': typeof AuthenticatedHistoryRoute
   '/verify-debug': typeof AuthenticatedVerifyDebugRoute
   '/solve/$sessionId': typeof AuthenticatedSolveSessionIdRoute
@@ -58,6 +65,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/formulas': typeof FormulasRoute
   '/history': typeof AuthenticatedHistoryRoute
   '/verify-debug': typeof AuthenticatedVerifyDebugRoute
   '/solve/$sessionId': typeof AuthenticatedSolveSessionIdRoute
@@ -67,20 +75,34 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
+  '/formulas': typeof FormulasRoute
   '/_authenticated/history': typeof AuthenticatedHistoryRoute
   '/_authenticated/verify-debug': typeof AuthenticatedVerifyDebugRoute
   '/_authenticated/solve/$sessionId': typeof AuthenticatedSolveSessionIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth' | '/history' | '/verify-debug' | '/solve/$sessionId'
+  fullPaths:
+    | '/'
+    | '/auth'
+    | '/formulas'
+    | '/history'
+    | '/verify-debug'
+    | '/solve/$sessionId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/history' | '/verify-debug' | '/solve/$sessionId'
+  to:
+    | '/'
+    | '/auth'
+    | '/formulas'
+    | '/history'
+    | '/verify-debug'
+    | '/solve/$sessionId'
   id:
     | '__root__'
     | '/'
     | '/_authenticated'
     | '/auth'
+    | '/formulas'
     | '/_authenticated/history'
     | '/_authenticated/verify-debug'
     | '/_authenticated/solve/$sessionId'
@@ -90,10 +112,18 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  FormulasRoute: typeof FormulasRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/formulas': {
+      id: '/formulas'
+      path: '/formulas'
+      fullPath: '/formulas'
+      preLoaderRoute: typeof FormulasRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/auth': {
       id: '/auth'
       path: '/auth'
@@ -158,6 +188,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  FormulasRoute: FormulasRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
