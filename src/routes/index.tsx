@@ -8,7 +8,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { Sparkles, ImagePlus, X, LogOut, History, Calculator } from "lucide-react";
+import { Sparkles, ImagePlus, X, LogOut, History } from "lucide-react";
+import { FormulaPicker } from "@/components/FormulaPicker";
 
 export const Route = createFileRoute("/")({
   head: () => ({
