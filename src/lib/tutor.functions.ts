@@ -232,8 +232,14 @@ STRICT RULES for check_expression (a real calculator will evaluate this):
       const note = `Your previous result was wrong. Recheck your work step by step and try again.
 
 Details from the independent calculator: result="${exec.result}"; check_expression=${JSON.stringify(exec.check_expression)}; computed check value=${check.computed ?? "not evaluable"}; parsed claimed value=${check.claimed ?? "not evaluable"}; reason=${check.reason}. The check_expression must be a literal exact numeric math expression (no variables, no words, no units) whose value equals the numeric value of result. If this step is purely symbolic, return check_expression: null.`;
-      exec = await askExecutor(note);
-      check = verifyResult(exec.result, exec.check_expression);
+      try {
+        const retryExec = await askExecutor(note);
+        exec = retryExec;
+        check = verifyResult(exec.result, exec.check_expression);
+      } catch (err) {
+        // Retry failed to parse — keep original result and flag for review
+        console.warn("Executor retry failed:", err);
+      }
     }
 
     const verificationWarning =
