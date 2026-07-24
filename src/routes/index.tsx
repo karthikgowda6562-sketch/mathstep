@@ -22,7 +22,7 @@ export const Route = createFileRoute("/")({
       { property: "og:title", content: "MathStep — Verified AI Math Tutor" },
       {
         property: "og:description",
-        content: "Solve math problems one verified step at a time with a patient AI tutor.",
+        content: "MathStep breaks math problems into verified, plain-spoken steps with follow-up explanations.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },

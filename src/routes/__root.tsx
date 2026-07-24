@@ -77,20 +77,24 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "MathStep — Learn math one step at a time" },
+      { title: "MathStep — Verified AI Math Tutor" },
       {
         name: "description",
         content:
-          "MathStep is a calm AI math tutor that breaks every problem into verified steps, so you learn how — not just what — the answer is.",
+          "MathStep breaks math problems into verified, plain-spoken steps with follow-up explanations.",
       },
-      { property: "og:title", content: "MathStep — Learn math one step at a time" },
+      { property: "og:title", content: "MathStep — Verified AI Math Tutor" },
       {
         property: "og:description",
         content:
-          "An AI tutor that breaks math problems into verified steps, with guided questions and re-explanations.",
+          "MathStep breaks math problems into verified, plain-spoken steps with follow-up explanations.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:title", content: "MathStep — Verified AI Math Tutor" },
+      { name: "twitter:description", content: "MathStep breaks math problems into verified, plain-spoken steps with follow-up explanations." },
+      { property: "og:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/fd2d3f19-6152-42cf-a962-549a80884624" },
+      { name: "twitter:image", content: "https://storage.googleapis.com/gpt-engineer-file-uploads/attachments/og-images/fd2d3f19-6152-42cf-a962-549a80884624" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
