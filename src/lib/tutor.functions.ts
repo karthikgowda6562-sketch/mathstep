@@ -81,7 +81,7 @@ async function solveWithAi(
   model: string,
   correction?: string,
 ): Promise<AiSolution> {
-  const { callGeminiJSON, SOLVER_SYSTEM_PROMPT } = await import("./ai.server");
+  const { callGeminiJSON, SOLVER_SYSTEM_PROMPT, sanitizeAiSolution } = await import("./ai.server");
   const userContent: Array<
     { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }
   > = [
@@ -93,7 +93,7 @@ async function solveWithAi(
     },
   ];
   if (imageDataUrl) userContent.push({ type: "image_url", image_url: { url: imageDataUrl } });
-  return callGeminiJSON<AiSolution>({
+  const raw = await callGeminiJSON<AiSolution>({
     model,
     temperature: 0.1,
     messages: [
@@ -101,6 +101,7 @@ async function solveWithAi(
       { role: "user", content: userContent },
     ],
   });
+  return sanitizeAiSolution(raw);
 }
 
 function formatNumber(v: number): string {
