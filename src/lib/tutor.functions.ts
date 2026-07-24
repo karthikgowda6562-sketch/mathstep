@@ -215,7 +215,14 @@ export const createTutorSession = createServerFn({ method: "POST" })
       .object({
         problem: z.string().min(1).max(4000),
         mode: z.enum(["guided", "direct"]).default("direct"),
-        imageDataUrl: z.string().optional(),
+        imageDataUrl: z
+          .string()
+          .max(7_000_000, "Image too large")
+          .regex(
+            /^data:image\/(png|jpe?g|gif|webp|heic|heif);base64,[A-Za-z0-9+/=]+$/,
+            "Invalid image data URL",
+          )
+          .optional(),
       })
       .parse(input),
   )
