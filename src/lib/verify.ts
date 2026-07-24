@@ -1,5 +1,17 @@
 import { evaluate, fraction } from "mathjs";
 
+function stripCommasAtDepthZero(text: string): string {
+  let out = "";
+  let depth = 0;
+  for (const char of text) {
+    if (char === "(" || char === "[" || char === "{") depth += 1;
+    else if (char === ")" || char === "]" || char === "}") depth -= 1;
+    else if (char === "," && depth === 0) continue;
+    out += char;
+  }
+  return out;
+}
+
 function normalizeMathInput(input: string): string {
   let text = input
     .trim()
@@ -9,9 +21,12 @@ function normalizeMathInput(input: string): string {
     .replace(/\\cdot|\\times/g, "*")
     .replace(/\\div/g, "/")
     .replace(/\\pi/g, "pi")
-    .replace(/,/g, "")
     .replace(/[≈≃≅]/g, "=")
     .replace(/[−–—]/g, "-");
+
+  // Remove commas only when they are not inside parentheses/brackets, so
+  // function arguments like mod(2^32, 191) and pow(2, 32) remain valid.
+  text = stripCommasAtDepthZero(text);
 
   for (let i = 0; i < 8; i += 1) {
     const next = text
