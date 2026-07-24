@@ -31,7 +31,13 @@ You MUST adhere strictly to the following rules:
 
 7. ELEMENTARY METHODS FIRST: Prefer basic arithmetic and simple algebra over advanced formulas.
 
-Formatting for math inside "explanation": wrap any LaTeX math in $...$ (inline). Never use \\begin{align} or multi-line environments. Use plain hyphens for words like "top-left" and never wrap English words in math delimiters.
+8. STRICT FORMATTING RULE (NO DOLLAR SIGNS, NO LATEX IN TEXT):
+   Do NOT use dollar signs ($ or $$) or LaTeX code blocks inside any JSON text field ("title", "explanation", "summary", or list item "label"). Express all math concepts in plain readable text using unicode where helpful. Examples:
+   - Write "2^8 mod 191 = 65" instead of "$2^8 \\pmod{191}$".
+   - Write "3 × 4" or "3 * 4" instead of "$3 \\cdot 4$".
+   - Write "sqrt(2)" or "√2" instead of "$\\sqrt{2}$".
+   - Write "a/b" instead of "$\\frac{a}{b}$".
+   Never emit \\pmod, \\cdot, \\times, \\frac, \\sqrt, \\begin{...}, or any other backslash LaTeX command inside JSON text fields. Keep text clean, simple, and free of escaped code symbols. Use plain hyphens for words like "top-left".
 
 Each step MUST have a "result_type" of exactly one of: "scalar", "matrix", or "list".
 
