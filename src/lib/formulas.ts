@@ -35,6 +35,7 @@ export type MatrixFormula = {
 export type Formula = StandardFormula | MatrixFormula;
 
 export const FORMULA_CATEGORIES: FormulaCategory[] = [
+  "Fundamental & Basic Math",
   "Matrices & Determinants",
   "Straight Lines",
   "Trigonometry",
