@@ -31,7 +31,13 @@ You MUST adhere strictly to the following rules:
 
 7. ELEMENTARY METHODS FIRST: Prefer basic arithmetic and simple algebra over advanced formulas.
 
-Formatting for math inside "explanation": wrap any LaTeX math in $...$ (inline). Never use \\begin{align} or multi-line environments. Use plain hyphens for words like "top-left" and never wrap English words in math delimiters.
+8. STRICT FORMATTING RULE (NO DOLLAR SIGNS, NO LATEX IN TEXT):
+   Do NOT use dollar signs ($ or $$) or LaTeX code blocks inside any JSON text field ("title", "explanation", "summary", or list item "label"). Express all math concepts in plain readable text using unicode where helpful. Examples:
+   - Write "2^8 mod 191 = 65" instead of "$2^8 \\pmod{191}$".
+   - Write "3 × 4" or "3 * 4" instead of "$3 \\cdot 4$".
+   - Write "sqrt(2)" or "√2" instead of "$\\sqrt{2}$".
+   - Write "a/b" instead of "$\\frac{a}{b}$".
+   Never emit \\pmod, \\cdot, \\times, \\frac, \\sqrt, \\begin{...}, or any other backslash LaTeX command inside JSON text fields. Keep text clean, simple, and free of escaped code symbols. Use plain hyphens for words like "top-left".
 
 Each step MUST have a "result_type" of exactly one of: "scalar", "matrix", or "list".
 
@@ -293,4 +299,106 @@ export async function callGeminiText(opts: {
   }
   const data = await res.json();
   return data?.choices?.[0]?.message?.content ?? "";
+}
+
+// -------- AI response sanitizer --------
+// Cleans string fields returned by the model: strips dollar delimiters and
+// converts common LaTeX macros to plain/unicode equivalents so nothing raw
+// leaks into titles, explanations, or labels.
+export function sanitizeAiText(input: string): string {
+  if (!input) return input;
+  let s = input;
+
+  // Drop \left \right (KaTeX sizing hints) but keep their delimiter.
+  s = s.replace(/\\left\s*/g, "").replace(/\\right\s*/g, "");
+
+  // \pmod{x} -> "mod x"; \bmod -> "mod"; \mod{x} -> "mod x"
+  s = s.replace(/\\p?mod\s*\{([^{}]*)\}/g, "mod $1");
+  s = s.replace(/\\bmod\b/g, "mod");
+  s = s.replace(/\\mod\b/g, "mod");
+
+  // \frac{a}{b} -> (a)/(b)
+  s = s.replace(/\\(?:d|t)?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, "($1)/($2)");
+
+  // \sqrt{x} -> sqrt(x)
+  s = s.replace(/\\sqrt\s*\{([^{}]*)\}/g, "sqrt($1)");
+
+  // \text{x} / \mathrm{x} / \mathbf{x} -> x
+  s = s.replace(/\\(?:text|mathrm|mathbf|mathbb|operatorname)\s*\{([^{}]*)\}/g, "$1");
+
+  // Common symbols → unicode / ascii
+  const macros: Record<string, string> = {
+    "\\times": "×",
+    "\\cdot": "·",
+    "\\div": "÷",
+    "\\pm": "±",
+    "\\mp": "∓",
+    "\\leq": "≤",
+    "\\geq": "≥",
+    "\\neq": "≠",
+    "\\approx": "≈",
+    "\\infty": "∞",
+    "\\pi": "π",
+    "\\theta": "θ",
+    "\\alpha": "α",
+    "\\beta": "β",
+    "\\gamma": "γ",
+    "\\delta": "δ",
+    "\\ldots": "…",
+    "\\dots": "…",
+    "\\cdots": "…",
+    "\\to": "→",
+    "\\rightarrow": "→",
+    "\\Rightarrow": "⇒",
+  };
+  for (const [k, v] of Object.entries(macros)) {
+    s = s.replace(new RegExp(k.replace(/\\/g, "\\\\") + "\\b", "g"), v);
+  }
+
+  // Remove \begin{...}...\end{...} wrappers, keep inner content
+  s = s.replace(/\\begin\{[^}]+\}([\s\S]*?)\\end\{[^}]+\}/g, "$1");
+
+  // Strip $$...$$ and $...$ delimiters (keep the math text between them).
+  s = s.replace(/\$\$([\s\S]*?)\$\$/g, "$1");
+  s = s.replace(/\$([^$\n]+?)\$/g, "$1");
+
+  // Drop any remaining stray dollar signs.
+  s = s.replace(/\$+/g, "");
+
+  // Remove leftover braces used only for grouping.
+  s = s.replace(/\{([^{}]*)\}/g, "$1");
+
+  // Collapse whitespace.
+  s = s.replace(/[ \t]+/g, " ").replace(/ ?\n ?/g, "\n").trim();
+
+  return s;
+}
+
+export interface AiSolutionShape {
+  summary?: string;
+  steps?: Array<{
+    title?: string;
+    explanation?: string;
+    result_type?: string;
+    mathjs_expression?: string;
+    matrix_expression?: string;
+    list_items?: Array<{ label?: string; mathjs_expression?: string }>;
+  }>;
+}
+
+export function sanitizeAiSolution<T extends AiSolutionShape>(sol: T): T {
+  if (!sol || typeof sol !== "object") return sol;
+  if (typeof sol.summary === "string") sol.summary = sanitizeAiText(sol.summary);
+  if (Array.isArray(sol.steps)) {
+    for (const step of sol.steps) {
+      if (typeof step.title === "string") step.title = sanitizeAiText(step.title);
+      if (typeof step.explanation === "string") step.explanation = sanitizeAiText(step.explanation);
+      if (Array.isArray(step.list_items)) {
+        for (const it of step.list_items) {
+          if (typeof it.label === "string") it.label = sanitizeAiText(it.label);
+        }
+      }
+    }
+  }
+  return sol;
 }

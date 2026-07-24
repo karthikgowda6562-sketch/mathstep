@@ -170,6 +170,14 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function stripStrayDollars(text: string): string {
+  // Count $ occurrences that are not part of $$ block delimiters. If there is
+  // an unmatched leftover, or if a lone $ is adjacent to whitespace/word
+  // boundary rather than wrapping math, drop it so nothing raw leaks to UI.
+  // We only strip AFTER splitting block/inline math has consumed matched pairs.
+  return text.replace(/\$(?=\s|$|[^\S\r\n])|(?:^|\s)\$/g, (m) => m.replace(/\$/g, ""));
+}
+
 // Render text that may contain $...$ inline, $$...$$ block, or \( \) / \[ \]
 // LaTeX. Falls back to rendering bare \command sequences via KaTeX too.
 export function MathText({ text, className }: { text: string; className?: string }) {
@@ -185,7 +193,10 @@ export function MathText({ text, className }: { text: string; className?: string
         if (chunk.startsWith("$$") && chunk.endsWith("$$")) {
           return renderKatex(chunk.slice(2, -2), String(i), true);
         }
-        return <Fragment key={i}>{renderInline(chunk, String(i))}</Fragment>;
+        // Drop any stray unmatched $ signs from the plain-text/inline chunk
+        // so they never render literally in the UI.
+        const cleaned = stripStrayDollars(chunk).replace(/\$(?![^$\n]+\$)/g, "");
+        return <Fragment key={i}>{renderInline(cleaned, String(i))}</Fragment>;
       })}
     </span>
   );
