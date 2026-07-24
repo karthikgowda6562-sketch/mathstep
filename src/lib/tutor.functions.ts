@@ -81,7 +81,7 @@ async function solveWithAi(
   model: string,
   correction?: string,
 ): Promise<AiSolution> {
-  const { callGeminiJSON } = await import("./ai.server");
+  const { callGeminiJSON, SOLVER_SYSTEM_PROMPT } = await import("./ai.server");
   const userContent: Array<
     { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }
   > = [
