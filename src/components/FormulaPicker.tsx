@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   FORMULA_CATEGORIES,
   FORMULA_DB,
@@ -20,8 +20,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { MathText } from "@/components/MathText";
 import { FunctionSquare } from "lucide-react";
 
 type Props = {
@@ -31,7 +38,9 @@ type Props = {
 export function FormulaPicker({ onInsert }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [activeCat, setActiveCat] = useState<FormulaCategory>("Algebra");
+  const [activeCat, setActiveCat] = useState<FormulaCategory>(
+    FORMULA_CATEGORIES[0],
+  );
   const [matrixFormula, setMatrixFormula] = useState<MatrixFormula | null>(null);
 
   const filtered = useMemo(() => {
@@ -41,13 +50,13 @@ export function FormulaPicker({ onInsert }: Props) {
         f.category === activeCat &&
         (q === "" ||
           f.name.toLowerCase().includes(q) ||
-          f.description.toLowerCase().includes(q))
+          f.description.toLowerCase().includes(q)),
     );
   }, [query, activeCat]);
 
   function handlePick(f: Formula) {
     if (f.kind === "standard") {
-      onInsert(f.template);
+      onInsert(f.templateText);
       setOpen(false);
     } else {
       setMatrixFormula(f);
@@ -64,42 +73,59 @@ export function FormulaPicker({ onInsert }: Props) {
             Formulas
           </Button>
         </PopoverTrigger>
-        <PopoverContent align="start" className="w-[min(92vw,520px)] p-3">
-          <Input
-            placeholder="Search formulas…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="mb-3"
-          />
-          <Tabs value={activeCat} onValueChange={(v) => setActiveCat(v as FormulaCategory)}>
-            <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 bg-muted/60 p-1">
-              {FORMULA_CATEGORIES.map((c) => (
-                <TabsTrigger key={c} value={c} className="text-xs">
-                  {c}
-                </TabsTrigger>
+        <PopoverContent
+          align="start"
+          className="w-[min(94vw,560px)] p-3"
+        >
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Select
+              value={activeCat}
+              onValueChange={(v) => setActiveCat(v as FormulaCategory)}
+            >
+              <SelectTrigger className="w-full sm:w-[220px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {FORMULA_CATEGORIES.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Input
+              placeholder="Search formulas…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="flex-1"
+            />
+          </div>
+
+          <div className="mt-3 max-h-80 overflow-y-auto pr-1">
+            <div className="grid gap-2">
+              {filtered.length === 0 && (
+                <p className="p-3 text-sm text-muted-foreground">
+                  No formulas match.
+                </p>
+              )}
+              {filtered.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => handlePick(f)}
+                  className="rounded-md border bg-card p-3 text-left transition hover:bg-accent"
+                >
+                  <p className="text-sm font-medium">{f.name}</p>
+                  <div className="mt-1 overflow-x-auto text-sm">
+                    <MathText text={`$$${f.latex}$$`} />
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {f.description}
+                  </p>
+                </button>
               ))}
-            </TabsList>
-            {FORMULA_CATEGORIES.map((c) => (
-              <TabsContent key={c} value={c} className="mt-3 max-h-72 overflow-y-auto">
-                <div className="grid gap-1">
-                  {filtered.length === 0 && (
-                    <p className="p-3 text-sm text-muted-foreground">No formulas.</p>
-                  )}
-                  {filtered.map((f) => (
-                    <button
-                      key={f.id}
-                      type="button"
-                      onClick={() => handlePick(f)}
-                      className="rounded-md border bg-card p-2 text-left transition hover:bg-accent"
-                    >
-                      <p className="text-sm font-medium">{f.name}</p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">{f.description}</p>
-                    </button>
-                  ))}
-                </div>
-              </TabsContent>
-            ))}
-          </Tabs>
+            </div>
+          </div>
         </PopoverContent>
       </Popover>
 
@@ -127,11 +153,12 @@ function MatrixEntryDialog({
   const [size, setSize] = useState<2 | 3>(2);
   const [matrices, setMatrices] = useState<string[][][]>([]);
 
-  // Reset when formula changes
-  useMemo(() => {
+  useEffect(() => {
     if (!formula) return;
     const empty = () =>
-      Array.from({ length: size }, () => Array.from({ length: size }, () => ""));
+      Array.from({ length: size }, () =>
+        Array.from({ length: size }, () => ""),
+      );
     setMatrices(Array.from({ length: formula.operands }, empty));
   }, [formula, size]);
 
@@ -149,15 +176,21 @@ function MatrixEntryDialog({
     return (
       "[" +
       m
-        .map((row) => "[" + row.map((v) => (v.trim() === "" ? "0" : v.trim())).join(",") + "]")
+        .map(
+          (row) =>
+            "[" +
+            row.map((v) => (v.trim() === "" ? "0" : v.trim())).join(",") +
+            "]",
+        )
         .join(",") +
       "]"
     );
   }
 
   function confirm() {
+    if (!formula) return;
     const parts = matrices.map(serialize);
-    onConfirm(formula!.build(parts));
+    onConfirm(formula.build(parts));
   }
 
   return (
@@ -192,7 +225,9 @@ function MatrixEntryDialog({
               </p>
               <div
                 className="grid gap-1"
-                style={{ gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))` }}
+                style={{
+                  gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))`,
+                }}
               >
                 {mat.map((row, r) =>
                   row.map((val, c) => (
@@ -203,7 +238,7 @@ function MatrixEntryDialog({
                       onChange={(e) => updateCell(mi, r, c, e.target.value)}
                       className="h-10 text-center"
                     />
-                  ))
+                  )),
                 )}
               </div>
             </div>
