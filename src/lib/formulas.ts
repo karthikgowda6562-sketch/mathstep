@@ -2,6 +2,7 @@
 // Five primary categories map to the DCET C20 modules.
 
 export type FormulaCategory =
+  | "Fundamental & Basic Math"
   | "Matrices & Determinants"
   | "Straight Lines"
   | "Trigonometry"
@@ -34,6 +35,7 @@ export type MatrixFormula = {
 export type Formula = StandardFormula | MatrixFormula;
 
 export const FORMULA_CATEGORIES: FormulaCategory[] = [
+  "Fundamental & Basic Math",
   "Matrices & Determinants",
   "Straight Lines",
   "Trigonometry",
@@ -42,6 +44,238 @@ export const FORMULA_CATEGORIES: FormulaCategory[] = [
 ];
 
 export const FORMULA_DB: Formula[] = [
+  // =====================================================================
+  // 0. FUNDAMENTAL & BASIC MATH
+  // =====================================================================
+
+  // -- Algebraic Identities --
+  {
+    kind: "standard",
+    id: "identity-square-sum",
+    category: "Fundamental & Basic Math",
+    name: "Perfect Square (Sum)",
+    description: "Expansion of (a + b) squared.",
+    latex: String.raw`(a + b)^2 = a^2 + 2ab + b^2`,
+    templateText: "Expand (___ + ___)^2",
+  },
+  {
+    kind: "standard",
+    id: "identity-square-diff",
+    category: "Fundamental & Basic Math",
+    name: "Perfect Square (Difference)",
+    description: "Expansion of (a − b) squared.",
+    latex: String.raw`(a - b)^2 = a^2 - 2ab + b^2`,
+    templateText: "Expand (___ - ___)^2",
+  },
+  {
+    kind: "standard",
+    id: "identity-diff-of-squares",
+    category: "Fundamental & Basic Math",
+    name: "Difference of Squares",
+    description: "Factor a² − b² as a product of sum and difference.",
+    latex: String.raw`a^2 - b^2 = (a - b)(a + b)`,
+    templateText: "Factor ___^2 - ___^2",
+  },
+  {
+    kind: "standard",
+    id: "identity-cube-sum",
+    category: "Fundamental & Basic Math",
+    name: "Cube of a Sum",
+    description: "Expansion of (a + b) cubed.",
+    latex: String.raw`(a + b)^3 = a^3 + 3a^2 b + 3a b^2 + b^3`,
+    templateText: "Expand (___ + ___)^3",
+  },
+  {
+    kind: "standard",
+    id: "identity-sum-diff-cubes",
+    category: "Fundamental & Basic Math",
+    name: "Sum/Difference of Cubes",
+    description: "Factor a³ ± b³ into linear and quadratic factors.",
+    latex: String.raw`a^3 \pm b^3 = (a \pm b)(a^2 \mp ab + b^2)`,
+    templateText: "Factor ___^3 ± ___^3",
+  },
+  {
+    kind: "standard",
+    id: "quadratic-formula",
+    category: "Fundamental & Basic Math",
+    name: "Quadratic Formula",
+    description: "Solve ax² + bx + c = 0 for x.",
+    latex: String.raw`x = \dfrac{-b \pm \sqrt{b^2 - 4ac}}{2a}`,
+    templateText:
+      "Solve using the quadratic formula: ___x^2 + ___x + ___ = 0",
+  },
+
+  // -- Exponent & Power Laws --
+  {
+    kind: "standard",
+    id: "exp-product",
+    category: "Fundamental & Basic Math",
+    name: "Exponent Product Rule",
+    description: "Multiply powers with the same base by adding exponents.",
+    latex: String.raw`a^m \cdot a^n = a^{m+n}`,
+    templateText: "Simplify ___^___ · ___^___",
+  },
+  {
+    kind: "standard",
+    id: "exp-quotient",
+    category: "Fundamental & Basic Math",
+    name: "Exponent Quotient Rule",
+    description: "Divide powers with the same base by subtracting exponents.",
+    latex: String.raw`\dfrac{a^m}{a^n} = a^{m-n}`,
+    templateText: "Simplify ___^___ / ___^___",
+  },
+  {
+    kind: "standard",
+    id: "exp-power",
+    category: "Fundamental & Basic Math",
+    name: "Power of a Power",
+    description: "Raise a power to another power by multiplying exponents.",
+    latex: String.raw`(a^m)^n = a^{m \cdot n}`,
+    templateText: "Simplify (___^___)^___",
+  },
+  {
+    kind: "standard",
+    id: "exp-negative-zero",
+    category: "Fundamental & Basic Math",
+    name: "Negative & Zero Exponents",
+    description: "Reciprocal for negative exponents; any nonzero base to 0 is 1.",
+    latex: String.raw`a^{-n} = \dfrac{1}{a^n},\ \ a^0 = 1`,
+    templateText: "Simplify ___^(___)",
+  },
+
+  // -- Logarithm Laws --
+  {
+    kind: "standard",
+    id: "log-product",
+    category: "Fundamental & Basic Math",
+    name: "Logarithm Product Rule",
+    description: "Log of a product is the sum of the logs.",
+    latex: String.raw`\log_b(xy) = \log_b x + \log_b y`,
+    templateText: "Expand log_(___)(___ · ___)",
+  },
+  {
+    kind: "standard",
+    id: "log-quotient",
+    category: "Fundamental & Basic Math",
+    name: "Logarithm Quotient Rule",
+    description: "Log of a quotient is the difference of the logs.",
+    latex: String.raw`\log_b\!\left(\dfrac{x}{y}\right) = \log_b x - \log_b y`,
+    templateText: "Expand log_(___)(___/___)",
+  },
+  {
+    kind: "standard",
+    id: "log-power",
+    category: "Fundamental & Basic Math",
+    name: "Logarithm Power Rule",
+    description: "Exponents come out in front of a logarithm.",
+    latex: String.raw`\log_b(x^k) = k\,\log_b x`,
+    templateText: "Simplify log_(___)(___^___)",
+  },
+  {
+    kind: "standard",
+    id: "log-change-of-base",
+    category: "Fundamental & Basic Math",
+    name: "Change of Base",
+    description: "Rewrite a logarithm using natural logs.",
+    latex: String.raw`\log_b a = \dfrac{\ln a}{\ln b}`,
+    templateText: "Evaluate log_(___)(___) using change of base.",
+  },
+
+  // -- Basic Geometry & Mensuration --
+  {
+    kind: "standard",
+    id: "circle-area",
+    category: "Fundamental & Basic Math",
+    name: "Area of a Circle",
+    description: "Area of a circle in terms of its radius.",
+    latex: String.raw`A = \pi r^2`,
+    templateText: "Find the area of a circle with radius r = ___",
+  },
+  {
+    kind: "standard",
+    id: "circle-circumference",
+    category: "Fundamental & Basic Math",
+    name: "Circumference of a Circle",
+    description: "Perimeter of a circle in terms of its radius.",
+    latex: String.raw`C = 2\pi r`,
+    templateText: "Find the circumference of a circle with radius r = ___",
+  },
+  {
+    kind: "standard",
+    id: "triangle-area",
+    category: "Fundamental & Basic Math",
+    name: "Area of a Triangle",
+    description: "Half of base times height.",
+    latex: String.raw`A = \tfrac{1}{2} b h`,
+    templateText: "Find the area of a triangle with base b = ___ and height h = ___",
+  },
+  {
+    kind: "standard",
+    id: "rectangle-area",
+    category: "Fundamental & Basic Math",
+    name: "Area of a Rectangle",
+    description: "Length times width.",
+    latex: String.raw`A = l \times w`,
+    templateText: "Find the area of a rectangle with length l = ___ and width w = ___",
+  },
+  {
+    kind: "standard",
+    id: "cylinder-volume",
+    category: "Fundamental & Basic Math",
+    name: "Volume of a Cylinder",
+    description: "Base area times height.",
+    latex: String.raw`V = \pi r^2 h`,
+    templateText: "Find the volume of a cylinder with radius r = ___ and height h = ___",
+  },
+  {
+    kind: "standard",
+    id: "sphere-volume",
+    category: "Fundamental & Basic Math",
+    name: "Volume of a Sphere",
+    description: "Volume of a sphere from its radius.",
+    latex: String.raw`V = \tfrac{4}{3}\pi r^3`,
+    templateText: "Find the volume of a sphere with radius r = ___",
+  },
+  {
+    kind: "standard",
+    id: "cone-volume",
+    category: "Fundamental & Basic Math",
+    name: "Volume of a Cone",
+    description: "One-third of the cylinder with the same base and height.",
+    latex: String.raw`V = \tfrac{1}{3}\pi r^2 h`,
+    templateText: "Find the volume of a cone with radius r = ___ and height h = ___",
+  },
+  {
+    kind: "standard",
+    id: "cube-volume",
+    category: "Fundamental & Basic Math",
+    name: "Volume of a Cube",
+    description: "Edge length cubed.",
+    latex: String.raw`V = a^3`,
+    templateText: "Find the volume of a cube with edge a = ___",
+  },
+
+  // -- Basic Probability & Statistics --
+  {
+    kind: "standard",
+    id: "mean",
+    category: "Fundamental & Basic Math",
+    name: "Arithmetic Mean",
+    description: "Average of a data set.",
+    latex: String.raw`\bar{x} = \dfrac{\sum x}{n}`,
+    templateText: "Find the mean of the data set: ___",
+  },
+  {
+    kind: "standard",
+    id: "classical-probability",
+    category: "Fundamental & Basic Math",
+    name: "Classical Probability",
+    description: "Favourable outcomes divided by total outcomes.",
+    latex: String.raw`P(A) = \dfrac{n(A)}{n(S)}`,
+    templateText:
+      "Find P(A) given n(A) = ___ favourable outcomes out of n(S) = ___ total outcomes.",
+  },
+
   // =====================================================================
   // 1. MATRICES & DETERMINANTS
   // =====================================================================
