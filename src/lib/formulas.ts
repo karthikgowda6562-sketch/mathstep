@@ -2,6 +2,7 @@
 // Five primary categories map to the DCET C20 modules.
 
 export type FormulaCategory =
+  | "Fundamental & Basic Math"
   | "Matrices & Determinants"
   | "Straight Lines"
   | "Trigonometry"
